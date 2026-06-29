@@ -70,6 +70,7 @@ export type ReportItem = {
   reason: string | null;
   reporterUid: string;
   createdAt: number | null;
+  isTest: boolean;
 };
 
 export type LogItem = {
@@ -137,6 +138,7 @@ function mapReport(d: DocumentData, id: string): ReportItem {
     reason: d.reason ?? null,
     reporterUid: d.reporterUid ?? "",
     createdAt: millis(d.createdAt),
+    isTest: !!d._test || isSmokeId(d.pointId, d.commentId, d.reporterUid),
   };
 }
 
