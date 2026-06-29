@@ -39,6 +39,7 @@ export type CommentItem = {
   state: ModState;
   reportCount: number;
   createdAt: number | null;
+  isTest: boolean;
 };
 
 export type DescriptionItem = {
@@ -49,6 +50,14 @@ export type DescriptionItem = {
   state: ModState;
   authorName: string;
   createdAt: number | null;
+  isTest: boolean;
+  lat: number | null;
+  lon: number | null;
+  type: string;
+  waterNearby: boolean;
+  fireSpot: boolean;
+  overnight: boolean;
+  emergencyShelter: boolean;
 };
 
 export type ReportItem = {
@@ -75,7 +84,12 @@ export type LogItem = {
   overrodeAI: boolean;
   source: string;
   createdAt: number | null;
+  isTest: boolean;
 };
+
+function isSmokeId(...ids: (string | null | undefined)[]): boolean {
+  return ids.some((id) => typeof id === "string" && id.startsWith("SMOKE"));
+}
 
 function mapComment(d: DocumentData, id: string, pointId: string): CommentItem {
   return {
@@ -88,6 +102,7 @@ function mapComment(d: DocumentData, id: string, pointId: string): CommentItem {
     state: (d.moderation?.state ?? "approved") as ModState,
     reportCount: d.reportCount ?? 0,
     createdAt: millis(d.createdAt),
+    isTest: !!d._test || isSmokeId(pointId, id, d.authorUid, d.authorName),
   };
 }
 
@@ -100,6 +115,14 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     state: (d.moderation?.state ?? "approved") as ModState,
     authorName: d.authorName ?? "",
     createdAt: millis(d.createdAt),
+    isTest: !!d._test || isSmokeId(id, d.authorUid, d.authorName),
+    lat: typeof d.lat === "number" ? d.lat : null,
+    lon: typeof d.lon === "number" ? d.lon : null,
+    type: d.type ?? "",
+    waterNearby: !!d.waterNearby,
+    fireSpot: !!d.fireSpot,
+    overnight: !!d.overnight,
+    emergencyShelter: !!d.emergencyShelter,
   };
 }
 
@@ -130,6 +153,7 @@ function mapLog(d: DocumentData, id: string): LogItem {
     overrodeAI: !!d.overrodeAI,
     source: d.source ?? "",
     createdAt: millis(d.createdAt),
+    isTest: !!d._test || isSmokeId(d.pointId, d.commentId, d.authorUid),
   };
 }
 
