@@ -1,0 +1,46 @@
+# CI panelu moderacji (Next.js, static export).
+# Zakres: lint + typecheck + build smoke. Bez testów zachowania (decyzja 2026-06-29).
+# Build czyta NEXT_PUBLIC_FB_* — w CI podajemy atrapy; statyczny eksport nie łączy się
+# z Firebase w trakcie builda, więc realne klucze nie są potrzebne (i tak są publiczne).
+name: panel-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install (ci)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (smoke)
+        run: npm run build
+        env:
+          # Atrapy — build wymaga obecności zmiennych, nie realnych wartości.
+          NEXT_PUBLIC_FB_API_KEY: ci-dummy-api-key
+          NEXT_PUBLIC_FB_APP_ID: 1:000000000000:web:cidummy
+          NEXT_PUBLIC_FB_SENDER_ID: '000000000000'
+          NEXT_PUBLIC_FB_PROJECT_ID: hyc-do-udy
+          NEXT_PUBLIC_FB_AUTH_DOMAIN: hyc-do-udy.firebaseapp.com
+          NEXT_PUBLIC_FB_STORAGE_BUCKET: hyc-do-udy.firebasestorage.app
+          NEXT_PUBLIC_FB_REGION: europe-central2
