@@ -41,13 +41,18 @@ export default function Home() {
   return <AuthGate>{({ user, signOut }) => <Panel email={user.email ?? ""} signOut={signOut} />}</AuthGate>;
 }
 
+let actInFlight = false;
 async function act(input: Parameters<typeof decide>[0], okMsg: string, after?: () => void) {
+  if (actInFlight) return;
+  actInFlight = true;
   try {
     await decide(input);
     toast.success(okMsg);
     after?.();
   } catch (e) {
     toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
+  } finally {
+    actInFlight = false;
   }
 }
 
@@ -117,7 +122,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
             </label>
             <QueueComments items={comments} error={commentsErr} hideTest={hideTest} />
             <QueueDescriptions items={descs} error={descsErr} hideTest={hideTest} />
-            <QueueReports items={reports} error={reportsErr} />
+            <QueueReports items={reports} error={reportsErr} hideTest={hideTest} />
           </TabsContent>
 
           <TabsContent value="history" className="pt-4">
@@ -382,12 +387,13 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
   );
 }
 
-function QueueReports({ items, error }: { items: ReportItem[]; error: string | null }) {
+function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: string | null; hideTest: boolean }) {
+  const visible = hideTest ? items.filter((r) => !r.isTest) : items;
   return (
-    <Section title="Zgłoszenia użytkowników" count={items.length}>
+    <Section title="Zgłoszenia użytkowników" count={visible.length}>
       {error ? (
         <QueueError message={error} />
-      ) : items.length === 0 ? (
+      ) : visible.length === 0 ? (
         <Empty text="Brak otwartych zgłoszeń." />
       ) : (
         <Table className="table-fixed">
@@ -400,7 +406,7 @@ function QueueReports({ items, error }: { items: ReportItem[]; error: string | n
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map((r) => (
+            {visible.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="align-top">
                   <Badge variant="outline">{TARGET_LABEL[r.target] ?? r.target}</Badge>
@@ -474,9 +480,13 @@ const HISTORY_FILTER_LABELS: Record<HistoryFilter, string> = {
 
 function HistoryTab() {
   const [rows, setRows] = useState<LogItem[] | null>(null);
+  const [historyErr, setHistoryErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<HistoryFilter>("all");
   useEffect(() => {
-    return watchHistory(setRows, () => setRows([]));
+    return watchHistory(
+      (items) => { setHistoryErr(null); setRows(items); },
+      () => { setHistoryErr("Nie udało się wczytać historii — sprawdź połączenie i odśwież."); setRows([]); },
+    );
   }, []);
 
   if (rows === null) return <Empty text="Ładowanie…" />;
@@ -491,7 +501,9 @@ function HistoryTab() {
         options={Object.entries(HISTORY_FILTER_LABELS).map(([v, label]) => ({ value: v as HistoryFilter, label }))}
       />
       <Section title="Historia decyzji" count={visible.length}>
-        {visible.length === 0 ? (
+        {historyErr ? (
+          <QueueError message={historyErr} />
+        ) : visible.length === 0 ? (
           <Empty text="Brak wpisów w historii decyzji." />
         ) : (
           <Table className="table-fixed">
@@ -549,7 +561,7 @@ function ContentTab() {
     fetchAllComments().then(setComments).catch(() => toast.error("Błąd komentarzy."));
     fetchAllDescriptions().then(setDescs).catch(() => toast.error("Błąd opisów."));
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div className="space-y-3">
