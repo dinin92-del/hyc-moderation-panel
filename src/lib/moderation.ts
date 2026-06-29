@@ -158,7 +158,7 @@ function mapLog(d: DocumentData, id: string): LogItem {
 }
 
 const byNewest = (a: { createdAt: number | null }, b: { createdAt: number | null }) =>
-  (b.createdAt ?? Infinity) - (a.createdAt ?? Infinity);
+  (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity);
 
 /** Komentarze needs_review (collectionGroup) — live. */
 export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e: unknown) => void) {

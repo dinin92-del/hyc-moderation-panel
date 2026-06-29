@@ -266,7 +266,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
     <Section title="Komentarze do sprawdzenia" count={visible.length}>
       {error ? (
         <QueueError message={error} />
-      ) : items.length === 0 ? (
+      ) : visible.length === 0 ? (
         <Empty text="Brak komentarzy do sprawdzenia." />
       ) : (
         <Table className="table-fixed">
@@ -330,7 +330,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
     <Section title="Opisy do sprawdzenia" count={visible.length}>
       {error ? (
         <QueueError message={error} />
-      ) : items.length === 0 ? (
+      ) : visible.length === 0 ? (
         <Empty text="Brak opisów do sprawdzenia." />
       ) : (
         <Table className="table-fixed">
@@ -590,19 +590,20 @@ function ContentTab() {
                     <TableCell className="align-top"><StateBadge state={c.state} /></TableCell>
                     <TableCell className="align-top"><StatusBadge status={c.status} /></TableCell>
                     <TableCell className="align-top text-right">
-                      {c.status !== "removed" && (
-                        <KebabMenu
-                          actions={[
-                            {
-                              label: "Odrzuć",
-                              variant: "destructive",
-                              onClick: () =>
-                                confirmReject("komentarz") &&
-                                act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono", load),
-                            },
-                          ]}
-                        />
-                      )}
+                      <KebabMenu
+                        actions={[
+                          ...(c.state !== "approved"
+                            ? [{ label: "Zatwierdź", onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono", load) }]
+                            : []),
+                          ...(c.status !== "removed"
+                            ? [{
+                                label: "Odrzuć",
+                                variant: "destructive" as const,
+                                onClick: () => confirmReject("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono", load),
+                              }]
+                            : []),
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -638,16 +639,11 @@ function ContentTab() {
                     <TableCell className="align-top text-right">
                       <KebabMenu
                         actions={[
+                          ...(p.state !== "approved"
+                            ? [{ label: "Zatwierdź", onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono", load) }]
+                            : []),
                           ...(p.state !== "rejected"
-                            ? [
-                                {
-                                  label: "Odrzuć",
-                                  variant: "destructive" as const,
-                                  onClick: () =>
-                                    confirmReject("opis") &&
-                                    act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono", load),
-                                },
-                              ]
+                            ? [{ label: "Odrzuć", variant: "destructive" as const, onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono", load) }]
                             : []),
                           ...(mapLink(p.lat, p.lon)
                             ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
