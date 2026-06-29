@@ -214,11 +214,10 @@ export function watchReportsQueue(cb: (items: ReportItem[]) => void, onErr: (e: 
   );
 }
 
-/** Historia decyzji (moderationLog), najnowsze pierwsze. */
-export async function fetchHistory(): Promise<LogItem[]> {
+/** Historia decyzji (moderationLog), najnowsze pierwsze — live. */
+export function watchHistory(cb: (items: LogItem[]) => void, onErr: (e: unknown) => void) {
   const q = query(collection(db, "moderationLog"), orderBy("createdAt", "desc"), limit(BROWSE_LIMIT));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => mapLog(d.data(), d.id));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapLog(d.data(), d.id))), onErr);
 }
 
 /** Wszystkie komentarze (każdy stan). */

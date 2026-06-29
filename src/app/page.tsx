@@ -26,7 +26,7 @@ import {
   decide,
   fetchAllComments,
   fetchAllDescriptions,
-  fetchHistory,
+  watchHistory,
   watchCommentsQueue,
   watchDescriptionsQueue,
   watchReportsQueue,
@@ -476,9 +476,7 @@ function HistoryTab() {
   const [rows, setRows] = useState<LogItem[] | null>(null);
   const [filter, setFilter] = useState<HistoryFilter>("all");
   useEffect(() => {
-    fetchHistory()
-      .then(setRows)
-      .catch(() => setRows([]));
+    return watchHistory(setRows, () => setRows([]));
   }, []);
 
   if (rows === null) return <Empty text="Ładowanie…" />;
