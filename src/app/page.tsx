@@ -474,12 +474,11 @@ const HISTORY_FILTER_LABELS: Record<HistoryFilter, string> = {
 
 function HistoryTab() {
   const [rows, setRows] = useState<LogItem[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
   const [filter, setFilter] = useState<HistoryFilter>("all");
   useEffect(() => {
     fetchHistory()
-      .then((data) => { setLoadError(false); setRows(data); })
-      .catch(() => { setLoadError(true); setRows([]); });
+      .then(setRows)
+      .catch(() => setRows([]));
   }, []);
 
   if (rows === null) return <Empty text="Ładowanie…" />;
@@ -494,9 +493,7 @@ function HistoryTab() {
         options={Object.entries(HISTORY_FILTER_LABELS).map(([v, label]) => ({ value: v as HistoryFilter, label }))}
       />
       <Section title="Historia decyzji" count={visible.length}>
-        {loadError ? (
-          <QueueError message="Nie udało się wczytać historii. Odśwież stronę." />
-        ) : visible.length === 0 ? (
+        {visible.length === 0 ? (
           <Empty text="Brak wpisów w historii decyzji." />
         ) : (
           <Table className="table-fixed">
