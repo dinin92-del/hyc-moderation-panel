@@ -11,6 +11,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { EnvSwitch } from "@/components/env-switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,8 +86,12 @@ export function AuthGate({
   return (
     <div className="grid min-h-screen place-items-center bg-muted/30 px-4">
       <Card className="w-full max-w-sm">
-        <CardHeader>
+        <CardHeader className="space-y-3">
           <CardTitle>Panel moderatora — Hyc do Budy</CardTitle>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Kontekst danych</span>
+            <EnvSwitch />
+          </div>
         </CardHeader>
         <CardContent>
           {state.phase === "denied" ? (

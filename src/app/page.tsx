@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
+import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -124,11 +125,13 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
           <p className="text-xs text-muted-foreground">Hyc do Budy · {email}</p>
         </div>
         <div className="flex items-center gap-3">
+          <EnvSwitch />
           <Button variant="outline" size="sm" onClick={signOut}>
             Wyloguj
           </Button>
         </div>
       </header>
+      <EnvBanner />
 
       <main className="mx-auto max-w-7xl px-6 py-6">
         <Tabs defaultValue="queue">
@@ -447,7 +450,13 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
             {visible.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="align-top">
-                  <Badge variant="outline">{TARGET_LABEL[r.target] ?? r.target}</Badge>
+                  <div className="flex flex-col gap-1">
+                    <Badge variant="outline">{TARGET_LABEL[r.target] ?? r.target}</Badge>
+                    <span className="font-mono text-[10px] text-muted-foreground break-all">
+                      {r.pointId}
+                      {r.commentId ? `/${r.commentId}` : ""}
+                    </span>
+                  </div>
                 </TableCell>
                 <TableCell className="align-top text-sm">
                   {r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—"}
