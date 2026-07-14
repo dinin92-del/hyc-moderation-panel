@@ -47,6 +47,7 @@ export const FLAG_LABEL: Record<string, string> = {
   zrujnowane: "Zrujnowane",
   nie_sluzy_schronienie: "Nie służy jako schronienie",
   zla_kategoria: "Zła kategoria / typ",
+  zly_opis: "Niewłaściwy opis",
   bledne_dane: "Błędne dane",
   spam_falszywy: "Spam / fałszywy / reklama",
   inne: "Inne",
