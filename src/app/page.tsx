@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   decide,
+  setUserBlock,
   fetchAllComments,
   fetchAllDescriptions,
   watchHistory,
@@ -48,6 +49,33 @@ async function act(input: Parameters<typeof decide>[0], okMsg: string, after?: (
   try {
     await decide(input);
     toast.success(okMsg);
+    after?.();
+  } catch (e) {
+    toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
+  } finally {
+    actInFlight = false;
+  }
+}
+
+// Blokada autora — osobny callable (setUserBlock), z twardym potwierdzeniem.
+// Wymaga authorUid; przy braku (starsze dokumenty) informuje zamiast cicho paść.
+async function actBlock(targetUid: string, authorName: string, after?: () => void) {
+  if (!targetUid) {
+    toast.error("Brak identyfikatora autora — nie można zablokować.");
+    return;
+  }
+  if (
+    !window.confirm(
+      `Zablokować autora „${authorName || "Użytkownik"}"? Nie będzie mógł dodawać ` +
+        "opisów, komentarzy ani zgłoszeń, dopóki go nie odblokujesz.",
+    )
+  )
+    return;
+  if (actInFlight) return;
+  actInFlight = true;
+  try {
+    await setUserBlock(targetUid, true);
+    toast.success("Autor zablokowany");
     after?.();
   } catch (e) {
     toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
@@ -317,6 +345,11 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
                           confirmReject("komentarz") &&
                           act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono"),
                       },
+                      {
+                        label: "Zablokuj autora",
+                        variant: "destructive",
+                        onClick: () => actBlock(c.authorUid, c.authorName),
+                      },
                     ]}
                   />
                 </TableCell>
@@ -371,6 +404,11 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                         variant: "destructive",
                         onClick: () =>
                           confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono"),
+                      },
+                      {
+                        label: "Zablokuj autora",
+                        variant: "destructive",
+                        onClick: () => actBlock(p.authorUid, p.authorName),
                       },
                       ...(mapLink(p.lat, p.lon)
                         ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]

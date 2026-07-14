@@ -49,6 +49,7 @@ export type DescriptionItem = {
   status: string;
   state: ModState;
   authorName: string;
+  authorUid: string;
   createdAt: number | null;
   isTest: boolean;
   lat: number | null;
@@ -115,6 +116,7 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     status: d.status ?? "active",
     state: (d.moderation?.state ?? "approved") as ModState,
     authorName: d.authorName ?? "",
+    authorUid: d.authorUid ?? "",
     createdAt: millis(d.createdAt),
     isTest: !!d._test || isSmokeId(id, d.authorUid, d.authorName),
     lat: typeof d.lat === "number" ? d.lat : null,
@@ -255,4 +257,17 @@ type DecisionInput = {
 export async function decide(input: DecisionInput): Promise<void> {
   const fn = httpsCallable(functions, "onModeratorDecision");
   await fn(input);
+}
+
+// ── Blokada/odblokowanie konta autora (callable setUserBlock) ────────────────
+// Pisze/kasuje moderationBlocks/{targetUid} po stronie serwera (admin SDK). Ban
+// działa natychmiast (reguły isNotBlocked czytają istnienie dokumentu) i nie
+// znika po skasowaniu profilu przez usera.
+export async function setUserBlock(
+  targetUid: string,
+  blocked: boolean,
+  reason?: string,
+): Promise<void> {
+  const fn = httpsCallable(functions, "setUserBlock");
+  await fn({ targetUid, blocked, reason });
 }
