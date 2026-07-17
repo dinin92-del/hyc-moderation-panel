@@ -66,6 +66,16 @@ export const CATEGORY_LABEL: Record<string, string> = {
   inne: "Inne",
 };
 
+// Etykiety werdyktu AI w wierszu kolejki (moderation.labels[]). Bazują na tych
+// samych kategoriach co zgłoszenia + techniczne `ai_error` (eskalacja po błędzie
+// Gemini). Nieznana etykieta → surowa wartość (nie gubimy sygnału).
+const AI_LABEL_EXTRA: Record<string, string> = {
+  ai_error: "Błąd AI — eskalacja",
+};
+export function aiLabel(l: string): string {
+  return AI_LABEL_EXTRA[l] ?? CATEGORY_LABEL[l] ?? FLAG_LABEL[l] ?? l;
+}
+
 export function fmtDate(ms: number | null): string {
   if (!ms) return "—";
   return new Date(ms).toLocaleString("pl-PL", {

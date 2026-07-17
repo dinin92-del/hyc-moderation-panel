@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
@@ -26,27 +26,41 @@ import {
 import {
   decide,
   setUserBlock,
+  unblockUser,
   fetchAllComments,
   fetchAllDescriptions,
+  fetchCommentById,
+  fetchDescriptionById,
   watchHistory,
   watchCommentsQueue,
   watchDescriptionsQueue,
   watchReportsQueue,
+  watchBlockedUsers,
+  QUEUE_LIMIT,
   type CommentItem,
   type DescriptionItem,
   type LogItem,
   type ReportItem,
+  type BlockedItem,
 } from "@/lib/moderation";
-import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, fmtDate } from "@/lib/labels";
+import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, aiLabel, fmtDate } from "@/lib/labels";
 
 export default function Home() {
   return <AuthGate>{({ user, signOut }) => <Panel email={user.email ?? ""} signOut={signOut} />}</AuthGate>;
 }
 
-let actInFlight = false;
+// Lock PER-CEL (nie globalny): różne wiersze działają równolegle, ta sama akcja
+// na tym samym celu jest deduplikowana (double-click / szybki retry).
+const inFlight = new Set<string>();
+function actKey(input: Parameters<typeof decide>[0]): string {
+  if (input.action === "closeReport") return `report:${input.reportId}`;
+  return `${input.action}:${input.pointId ?? ""}/${input.commentId ?? ""}`;
+}
+
 async function act(input: Parameters<typeof decide>[0], okMsg: string, after?: () => void) {
-  if (actInFlight) return;
-  actInFlight = true;
+  const key = actKey(input);
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
   try {
     await decide(input);
     toast.success(okMsg);
@@ -54,7 +68,7 @@ async function act(input: Parameters<typeof decide>[0], okMsg: string, after?: (
   } catch (e) {
     toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
   } finally {
-    actInFlight = false;
+    inFlight.delete(key);
   }
 }
 
@@ -72,8 +86,9 @@ async function actBlock(targetUid: string, authorName: string, after?: () => voi
     )
   )
     return;
-  if (actInFlight) return;
-  actInFlight = true;
+  const key = `block:${targetUid}`;
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
   try {
     await setUserBlock(targetUid, true);
     toast.success("Autor zablokowany");
@@ -81,7 +96,24 @@ async function actBlock(targetUid: string, authorName: string, after?: () => voi
   } catch (e) {
     toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
   } finally {
-    actInFlight = false;
+    inFlight.delete(key);
+  }
+}
+
+// Odblokowanie autora z listy „Zablokowani".
+async function actUnblock(targetUid: string, after?: () => void) {
+  if (!window.confirm("Odblokować tego autora? Znów będzie mógł dodawać treści.")) return;
+  const key = `unblock:${targetUid}`;
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
+  try {
+    await unblockUser(targetUid);
+    toast.success("Autor odblokowany");
+    after?.();
+  } catch (e) {
+    toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
+  } finally {
+    inFlight.delete(key);
   }
 }
 
@@ -139,6 +171,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
             <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
             <TabsTrigger value="history">Historia decyzji</TabsTrigger>
             <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
+            <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
           </TabsList>
 
           <TabsContent value="queue" className="space-y-6 pt-4">
@@ -162,6 +195,10 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
 
           <TabsContent value="content" className="pt-4">
             <ContentTab />
+          </TabsContent>
+
+          <TabsContent value="blocked" className="pt-4">
+            <BlockedTab />
           </TabsContent>
         </Tabs>
       </main>
@@ -233,13 +270,43 @@ function TestBadge() {
   );
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+// Etykiety werdyktu AI (moderation.labels[]) — czemu item trafił do needs_review.
+function LabelChips({ labels }: { labels: string[] }) {
+  if (!labels || labels.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {labels.map((l) => (
+        <span
+          key={l}
+          className="inline-flex items-center rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700"
+        >
+          AI: {aiLabel(l)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Ostrzeżenie o ucięciu listy (osiągnięto twardy limit zapytania).
+function TruncNote({ shown }: { shown: number }) {
+  if (shown < QUEUE_LIMIT) return null;
+  return (
+    <div className="border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
+      ⚠ Pokazano pierwsze {QUEUE_LIMIT} — lista może być dłuższa. Przejrzyj i odśwież, żeby zobaczyć resztę.
+    </div>
+  );
+}
+
+function Section({ title, count, children, truncated }: { title: string; count: number; children: React.ReactNode; truncated?: number }) {
   return (
     <section>
       <h2 className="mb-2 text-sm font-semibold text-muted-foreground">
         {title} <span className="font-mono">({count})</span>
       </h2>
-      <div className="overflow-hidden rounded-lg border bg-background">{children}</div>
+      <div className="overflow-hidden rounded-lg border bg-background">
+        {children}
+        {truncated != null && <TruncNote shown={truncated} />}
+      </div>
     </section>
   );
 }
@@ -299,7 +366,7 @@ function KebabMenu({ actions }: { actions: KebabAction[] }) {
 function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((c) => !c.isTest) : items;
   return (
-    <Section title="Komentarze do sprawdzenia" count={visible.length}>
+    <Section title="Komentarze do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
         <QueueError message={error} />
       ) : visible.length === 0 ? (
@@ -323,6 +390,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
                     <span className="break-words">{c.authorName || "Użytkownik"}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">{c.pointId}</span>
                     {c.isTest && <TestBadge />}
+                    <LabelChips labels={c.labels} />
                   </div>
                 </TableCell>
                 <TableCell className="align-top text-sm">
@@ -368,7 +436,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
 function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
   return (
-    <Section title="Opisy do sprawdzenia" count={visible.length}>
+    <Section title="Opisy do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
         <QueueError message={error} />
       ) : visible.length === 0 ? (
@@ -389,6 +457,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                 <TableCell className="align-top text-sm font-medium">
                   <span className="break-words">{p.name || p.pointId}</span>
                   <PointProps p={p} />
+                  <LabelChips labels={p.labels} />
                   {p.isTest && <div className="mt-1"><TestBadge /></div>}
                 </TableCell>
                 <TableCell className="align-top text-sm">
@@ -431,7 +500,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
 function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((r) => !r.isTest) : items;
   return (
-    <Section title="Zgłoszenia użytkowników" count={visible.length}>
+    <Section title="Zgłoszenia użytkowników" count={visible.length} truncated={items.length}>
       {error ? (
         <QueueError message={error} />
       ) : visible.length === 0 ? (
@@ -440,6 +509,7 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" />
               <TableHead className="w-24">Cel</TableHead>
               <TableHead className="w-40">Przyczyna</TableHead>
               <TableHead>Powód (tekst)</TableHead>
@@ -448,43 +518,147 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
           </TableHeader>
           <TableBody>
             {visible.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="align-top">
-                  <div className="flex flex-col gap-1">
-                    <Badge variant="outline">{TARGET_LABEL[r.target] ?? r.target}</Badge>
-                    <span className="font-mono text-[10px] text-muted-foreground break-all">
-                      {r.pointId}
-                      {r.commentId ? `/${r.commentId}` : ""}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell className="align-top text-sm">
-                  {r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—"}
-                </TableCell>
-                <TableCell className="align-top text-sm text-muted-foreground">
-                  <p className="whitespace-pre-wrap break-words">{r.reason || "—"}</p>
-                </TableCell>
-                <TableCell className="align-top text-right">
-                  <KebabMenu
-                    actions={[
-                      {
-                        label: "Zasadne — zamknij",
-                        onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zamknięto"),
-                      },
-                      {
-                        label: "Odrzuć zgłoszenie",
-                        variant: "destructive",
-                        onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Odrzucono zgł."),
-                      },
-                    ]}
-                  />
-                </TableCell>
-              </TableRow>
+              <ReportRow key={r.id} r={r} />
             ))}
           </TableBody>
         </Table>
       )}
     </Section>
+  );
+}
+
+// Wiersz zgłoszenia z rozwijanym PODGLĄDEM zgłoszonej treści (resolve celu po id)
+// + akcjami NA CEL (zatwierdź/odrzuć), obok zamknięcia samego zgłoszenia.
+function ReportRow({ r }: { r: ReportItem }) {
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<CommentItem | DescriptionItem | null | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const isComment = r.target === "comment";
+  const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
+
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && target === undefined) {
+      setLoading(true);
+      try {
+        const t = isComment && r.commentId
+          ? await fetchCommentById(r.pointId, r.commentId)
+          : await fetchDescriptionById(r.pointId);
+        setTarget(t);
+      } catch {
+        setTarget(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="align-top">
+          <button
+            type="button"
+            onClick={toggle}
+            className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+            title="Podgląd zgłoszonej treści"
+          >
+            {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+        </TableCell>
+        <TableCell className="align-top">
+          <div className="flex flex-col gap-1">
+            <Badge variant="outline">{TARGET_LABEL[r.target] ?? r.target}</Badge>
+            <span className="font-mono text-[10px] text-muted-foreground break-all">
+              {r.pointId}
+              {r.commentId ? `/${r.commentId}` : ""}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell className="align-top text-sm">{reason}</TableCell>
+        <TableCell className="align-top text-sm text-muted-foreground">
+          <p className="whitespace-pre-wrap break-words">{r.reason || "—"}</p>
+        </TableCell>
+        <TableCell className="align-top text-right">
+          <KebabMenu
+            actions={[
+              {
+                label: "Zasadne — zamknij",
+                onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zamknięto"),
+              },
+              {
+                label: "Odrzuć zgłoszenie",
+                variant: "destructive",
+                onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Odrzucono zgł."),
+              },
+            ]}
+          />
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={5} className="bg-muted/30">
+            {loading ? (
+              <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
+            ) : target === null ? (
+              <span className="text-xs text-muted-foreground">Nie znaleziono zgłoszonej treści (mogła zostać usunięta).</span>
+            ) : target ? (
+              <ReportTarget r={r} target={target} isComment={isComment} />
+            ) : null}
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+function ReportTarget({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem; isComment: boolean }) {
+  const c = isComment ? (target as CommentItem) : null;
+  const p = !isComment ? (target as DescriptionItem) : null;
+  const actions: KebabAction[] = isComment
+    ? [
+        { label: "Zatwierdź komentarz", onClick: () => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Zatwierdzono") },
+        {
+          label: "Odrzuć komentarz",
+          variant: "destructive",
+          onClick: () => confirmReject("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Odrzucono"),
+        },
+      ]
+    : [
+        { label: "Zatwierdź opis", onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Zatwierdzono") },
+        {
+          label: "Odrzuć opis",
+          variant: "destructive",
+          onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Odrzucono"),
+        },
+        ...(p && mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
+      ];
+  return (
+    <div className="flex items-start justify-between gap-3 py-1">
+      <div className="min-w-0 text-sm">
+        {c && (
+          <>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="font-medium">{c.authorName || "Użytkownik"}</span>
+              <StateBadge state={c.state} />
+            </div>
+            <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
+          </>
+        )}
+        {p && (
+          <>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="font-medium">{p.name || p.pointId}</span>
+              <StateBadge state={p.state} />
+            </div>
+            <PointProps p={p} />
+            <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
+          </>
+        )}
+      </div>
+      <KebabMenu actions={actions} />
+    </div>
   );
 }
 
@@ -595,6 +769,54 @@ function HistoryTab() {
         )}
       </Section>
     </div>
+  );
+}
+
+function BlockedTab() {
+  const [rows, setRows] = useState<BlockedItem[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    return watchBlockedUsers(
+      (items) => { setErr(null); setRows(items); },
+      () => { setErr("Nie udało się wczytać listy zablokowanych."); setRows([]); },
+    );
+  }, []);
+
+  if (rows === null) return <Empty text="Ładowanie…" />;
+
+  return (
+    <Section title="Zablokowani autorzy" count={rows.length}>
+      {err ? (
+        <QueueError message={err} />
+      ) : rows.length === 0 ? (
+        <Empty text="Brak zablokowanych autorów." />
+      ) : (
+        <Table className="table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead>UID autora</TableHead>
+              <TableHead className="w-56">Powód</TableHead>
+              <TableHead className="w-36">Kiedy</TableHead>
+              <TableHead className="w-12 text-right">Akcje</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((b) => (
+              <TableRow key={b.uid}>
+                <TableCell className="align-top font-mono text-xs break-all">{b.uid}</TableCell>
+                <TableCell className="align-top text-sm text-muted-foreground">
+                  <p className="whitespace-pre-wrap break-words">{b.reason || "—"}</p>
+                </TableCell>
+                <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(b.blockedAt)}</TableCell>
+                <TableCell className="align-top text-right">
+                  <KebabMenu actions={[{ label: "Odblokuj", onClick: () => actUnblock(b.uid) }]} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Section>
   );
 }
 

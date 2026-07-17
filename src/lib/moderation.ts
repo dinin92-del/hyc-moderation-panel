@@ -1,6 +1,8 @@
 import {
   collection,
   collectionGroup,
+  doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -20,8 +22,8 @@ export type ModState =
   | "needs_review"
   | "reviewing";
 
-const QUEUE_LIMIT = 200;
-const BROWSE_LIMIT = 400;
+export const QUEUE_LIMIT = 200;
+export const BROWSE_LIMIT = 400;
 
 function millis(ts: unknown): number | null {
   const v = ts as { toMillis?: () => number } | null;
@@ -37,6 +39,7 @@ export type CommentItem = {
   text: string;
   status: string;
   state: ModState;
+  labels: string[];
   reportCount: number;
   createdAt: number | null;
   isTest: boolean;
@@ -48,6 +51,7 @@ export type DescriptionItem = {
   description: string;
   status: string;
   state: ModState;
+  labels: string[];
   authorName: string;
   authorUid: string;
   createdAt: number | null;
@@ -102,6 +106,7 @@ function mapComment(d: DocumentData, id: string, pointId: string): CommentItem {
     text: d.text ?? "",
     status: d.status ?? "active",
     state: (d.moderation?.state ?? "approved") as ModState,
+    labels: Array.isArray(d.moderation?.labels) ? d.moderation.labels : [],
     reportCount: d.reportCount ?? 0,
     createdAt: millis(d.createdAt),
     isTest: !!d._test || isSmokeId(pointId, id, d.authorUid, d.authorName),
@@ -115,6 +120,7 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     description: d.description ?? "",
     status: d.status ?? "active",
     state: (d.moderation?.state ?? "approved") as ModState,
+    labels: Array.isArray(d.moderation?.labels) ? d.moderation.labels : [],
     authorName: d.authorName ?? "",
     authorUid: d.authorUid ?? "",
     createdAt: millis(d.createdAt),
@@ -270,4 +276,53 @@ export async function setUserBlock(
 ): Promise<void> {
   const fn = httpsCallable(functions, "setUserBlock");
   await fn({ targetUid, blocked, reason });
+}
+
+/** Odblokowanie autora — kasuje moderationBlocks/{uid} (setUserBlock blocked=false). */
+export async function unblockUser(targetUid: string): Promise<void> {
+  await setUserBlock(targetUid, false);
+}
+
+// ── Lista zablokowanych (moderationBlocks) ───────────────────────────────────
+export type BlockedItem = {
+  uid: string;
+  blockedBy: string;
+  reason: string;
+  blockedAt: number | null;
+};
+
+function mapBlocked(d: DocumentData, id: string): BlockedItem {
+  return {
+    uid: id,
+    blockedBy: d.blockedBy ?? "",
+    reason: d.reason ?? "",
+    blockedAt: millis(d.blockedAt),
+  };
+}
+
+/** Zablokowani autorzy — live (moderationBlocks, read: isMod). */
+export function watchBlockedUsers(cb: (items: BlockedItem[]) => void, onErr: (e: unknown) => void) {
+  const q = query(collection(db, "moderationBlocks"), limit(BROWSE_LIMIT));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const out = snap.docs.map((d) => mapBlocked(d.data(), d.id));
+      out.sort((a, b) => (b.blockedAt ?? -Infinity) - (a.blockedAt ?? -Infinity));
+      cb(out);
+    },
+    onErr,
+  );
+}
+
+// ── Podgląd celu zgłoszenia (resolve pojedynczego dokumentu) ─────────────────
+/** Komentarz po ścieżce points/{pointId}/comments/{commentId} (podgląd w zgłoszeniu). */
+export async function fetchCommentById(pointId: string, commentId: string): Promise<CommentItem | null> {
+  const snap = await getDoc(doc(db, "points", pointId, "comments", commentId));
+  return snap.exists() ? mapComment(snap.data(), snap.id, pointId) : null;
+}
+
+/** Opis punktu po points/{pointId} (podgląd w zgłoszeniu). */
+export async function fetchDescriptionById(pointId: string): Promise<DescriptionItem | null> {
+  const snap = await getDoc(doc(db, "points", pointId));
+  return snap.exists() ? mapDescription(snap.data(), snap.id) : null;
 }
