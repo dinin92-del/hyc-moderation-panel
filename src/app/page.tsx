@@ -21,6 +21,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -335,7 +337,7 @@ type KebabAction = {
   variant?: "default" | "destructive";
 };
 
-function KebabMenu({ actions }: { actions: KebabAction[] }) {
+function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: string }) {
   if (actions.length === 0) return null;
   return (
     <DropdownMenu>
@@ -344,6 +346,14 @@ function KebabMenu({ actions }: { actions: KebabAction[] }) {
         <span className="sr-only">Akcje</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
+        {header && (
+          <>
+            <DropdownMenuLabel className="max-w-64 text-xs font-normal whitespace-normal text-muted-foreground">
+              {header}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        )}
         {actions.map((action, i) => (
           <DropdownMenuItem
             key={i}
@@ -582,15 +592,18 @@ function ReportRow({ r }: { r: ReportItem }) {
         </TableCell>
         <TableCell className="align-top text-right">
           <KebabMenu
+            header="Zamyka tylko zgłoszenie. Treść ukryjesz osobno przez „Odrzuć opis/komentarz” po rozwinięciu wiersza."
             actions={[
               {
-                label: "Zasadne — zamknij",
-                onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zamknięto"),
+                label: "Uznaj zgłoszenie i zamknij",
+                onClick: () =>
+                  act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte (zasadne)"),
               },
               {
-                label: "Odrzuć zgłoszenie",
+                label: "Odrzuć zgłoszenie jako niezasadne",
                 variant: "destructive",
-                onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Odrzucono zgł."),
+                onClick: () =>
+                  act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)"),
               },
             ]}
           />
