@@ -283,6 +283,35 @@ export async function unblockUser(targetUid: string): Promise<void> {
   await setUserBlock(targetUid, false);
 }
 
+// ── Edycja / usuwanie punktu przez moderatora (callable) ─────────────────────
+// Kuratorska edycja i twarde usunięcie punktu. Oba przez callable serwerowy
+// (admin SDK omija reguły, weryfikuje role==moderator). Edycja treści
+// (nazwa/opis) zapisuje po stronie serwera moderation=approved + contentHash, więc
+// onPointModeration NIE re-moderuje zaufanej poprawki. Delete kaskaduje komentarze.
+export type PointEditFields = Partial<{
+  name: string | null;
+  description: string | null;
+  type: string;
+  lat: number;
+  lon: number;
+  waterNearby: boolean;
+  fireSpot: boolean;
+  overnight: boolean;
+  emergencyShelter: boolean;
+}>;
+
+/** Zapisuje zmienione pola punktu (tylko podane wchodzą do update). */
+export async function editPoint(pointId: string, fields: PointEditFields): Promise<void> {
+  const fn = httpsCallable(functions, "onModeratorEditPoint");
+  await fn({ pointId, fields });
+}
+
+/** Twarde usunięcie punktu (+ kaskada komentarzy) z bazy. Nieodwracalne. */
+export async function deletePoint(pointId: string): Promise<void> {
+  const fn = httpsCallable(functions, "onModeratorDeletePoint");
+  await fn({ pointId });
+}
+
 // ── Lista zablokowanych (moderationBlocks) ───────────────────────────────────
 export type BlockedItem = {
   uid: string;
