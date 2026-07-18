@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
@@ -58,7 +59,44 @@ const region =
     ? process.env.NEXT_PUBLIC_FB_DEV_REGION
     : process.env.NEXT_PUBLIC_FB_REGION) || "europe-central2";
 
-const app = getApps().length ? getApp() : initializeApp(config);
+const isNewApp = getApps().length === 0;
+const app = isNewApp ? initializeApp(config) : getApp();
+
+// ── App Check (reCAPTCHA v3) ──────────────────────────────────────────────────
+// Panel czyta Firestore BEZPOŚREDNIO (kolejka moderacji: collectionGroup comments,
+// reports, points). Gdy w konsoli włączymy App Check ENFORCE dla Firestore, KAŻDE
+// żądanie bez ważnego tokenu App Check jest odrzucane — niezależnie od logowania.
+// Bez tego bloku panel przestałby ładować kolejkę po enforce (audyt bezpieczeństwa
+// 0717). site key reCAPTCHA v3 jest PUBLICZNY (klucz sekretny trzyma Firebase),
+// więc jest bezpieczny w bundlu klienta. Rejestracja web app + klucz: konsola
+// Firebase → App Check → Apps → web → reCAPTCHA v3. Init tylko przy PIERWSZym
+// utworzeniu app (isNewApp) → brak 'appCheck/already-initialized' przy HMR.
+if (isNewApp && typeof window !== "undefined") {
+  const siteKey =
+    ACTIVE_ENV === "dev"
+      ? process.env.NEXT_PUBLIC_FB_DEV_APPCHECK_SITE_KEY
+      : process.env.NEXT_PUBLIC_FB_APPCHECK_SITE_KEY;
+  if (siteKey) {
+    // Localhost/dev bez zarejestrowanej domeny → reCAPTCHA odrzuca. Debug token
+    // pozwala pracować lokalnie: wypisany w konsoli przeglądarki token dodaj w
+    // Firebase → App Check → Apps → web → Manage debug tokens.
+    if (process.env.NODE_ENV !== "production") {
+      (
+        self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }
+      ).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+    }
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(siteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } else if (process.env.NODE_ENV === "production") {
+    // Fail loud: brak klucza w produkcji = brak tokenów = panel padnie po enforce.
+    console.error(
+      "App Check: brak NEXT_PUBLIC_FB(_DEV)_APPCHECK_SITE_KEY — po włączeniu " +
+        "enforce dla Firestore panel przestanie czytać dane moderacji.",
+    );
+  }
+}
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
