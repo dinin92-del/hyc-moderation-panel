@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
@@ -8,6 +8,14 @@ import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -29,6 +37,9 @@ import {
   decide,
   setUserBlock,
   unblockUser,
+  deletePoint,
+  editPoint,
+  type PointEditFields,
   fetchAllComments,
   fetchAllDescriptions,
   fetchCommentById,
@@ -94,6 +105,30 @@ async function actBlock(targetUid: string, authorName: string, after?: () => voi
   try {
     await setUserBlock(targetUid, true);
     toast.success("Autor zablokowany");
+    after?.();
+  } catch (e) {
+    toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+// Twarde usunięcie punktu — osobny callable (onModeratorDeletePoint), z twardym
+// potwierdzeniem. Kasuje punkt z bazy + komentarze; znika z mapy wszystkim.
+async function actDeletePoint(pointId: string, pointName: string, after?: () => void) {
+  if (
+    !window.confirm(
+      `Usunąć punkt „${pointName || pointId}" NA STAŁE? Zniknie z bazy i z mapy ` +
+        "(wszystkim), razem z komentarzami. Operacja nieodwracalna.",
+    )
+  )
+    return;
+  const key = `deletePoint:${pointId}`;
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
+  try {
+    await deletePoint(pointId);
+    toast.success("Punkt usunięty");
     after?.();
   } catch (e) {
     toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
@@ -443,8 +478,125 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
   );
 }
 
+// Inline formularz kuratorskiej edycji punktu (rozwijany pod wierszem). Wysyła
+// tylko ZMIENIONE pola (callable wymaga ≥1). Zmiana nazwy/opisu → serwer zapisuje
+// approved + contentHash (bez re-moderacji). Bez nowej zależności (Input/Select/
+// natywne checkboxy + textarea).
+function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () => void }) {
+  const [name, setName] = useState(point.name ?? "");
+  const [description, setDescription] = useState(point.description ?? "");
+  const [type, setType] = useState(point.type ?? "");
+  const [lat, setLat] = useState(point.lat?.toString() ?? "");
+  const [lon, setLon] = useState(point.lon?.toString() ?? "");
+  const [waterNearby, setWaterNearby] = useState(point.waterNearby);
+  const [fireSpot, setFireSpot] = useState(point.fireSpot);
+  const [overnight, setOvernight] = useState(point.overnight);
+  const [emergencyShelter, setEmergencyShelter] = useState(point.emergencyShelter);
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    const fields: PointEditFields = {};
+    if (name.trim() !== (point.name ?? "")) fields.name = name.trim() || null;
+    if (description.trim() !== (point.description ?? "")) {
+      fields.description = description.trim() || null;
+    }
+    if (type !== point.type) fields.type = type;
+    if (lat.trim() !== "" && Number(lat) !== point.lat) {
+      const v = Number(lat);
+      if (!Number.isFinite(v)) return toast.error("Szerokość: nieprawidłowa liczba");
+      fields.lat = v;
+    }
+    if (lon.trim() !== "" && Number(lon) !== point.lon) {
+      const v = Number(lon);
+      if (!Number.isFinite(v)) return toast.error("Długość: nieprawidłowa liczba");
+      fields.lon = v;
+    }
+    if (waterNearby !== point.waterNearby) fields.waterNearby = waterNearby;
+    if (fireSpot !== point.fireSpot) fields.fireSpot = fireSpot;
+    if (overnight !== point.overnight) fields.overnight = overnight;
+    if (emergencyShelter !== point.emergencyShelter) {
+      fields.emergencyShelter = emergencyShelter;
+    }
+    if (Object.keys(fields).length === 0) return toast("Brak zmian do zapisania");
+    setSaving(true);
+    try {
+      await editPoint(point.pointId, fields);
+      toast.success("Punkt zaktualizowany");
+      onDone();
+    } catch (e) {
+      toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const flag = (
+    label: string,
+    checked: boolean,
+    set: (v: boolean) => void,
+  ) => (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} />
+      {label}
+    </label>
+  );
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-sm">
+          <span className="text-muted-foreground">Nazwa</span>
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="text-muted-foreground">Kategoria</span>
+          <Select value={type} onValueChange={(v) => setType(v ?? "")}>
+            <SelectTrigger><SelectValue placeholder="Wybierz typ" /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(SHELTER_TYPE_LABEL).map(([code, label]) => (
+                <SelectItem key={code} value={code}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
+      <label className="block space-y-1 text-sm">
+        <span className="text-muted-foreground">Opis</span>
+        <textarea
+          className="min-h-24 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-sm">
+          <span className="text-muted-foreground">Szerokość (lat)</span>
+          <Input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" />
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="text-muted-foreground">Długość (lon)</span>
+          <Input value={lon} onChange={(e) => setLon(e.target.value)} inputMode="decimal" />
+        </label>
+      </div>
+      <div className="flex flex-wrap gap-4">
+        {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
+        {flag("Miejsce na ogień", fireSpot, setFireSpot)}
+        {flag("Nocleg", overnight, setOvernight)}
+        {flag("Schronienie awaryjne", emergencyShelter, setEmergencyShelter)}
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={submit} disabled={saving}>
+          {saving ? "Zapisywanie…" : "Zapisz zmiany"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone} disabled={saving}>Anuluj</Button>
+      </div>
+    </div>
+  );
+}
+
 function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
+  const [editingId, setEditingId] = useState<string | null>(null);
   return (
     <Section title="Opisy do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
@@ -463,7 +615,8 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
           </TableHeader>
           <TableBody>
             {visible.map((p) => (
-              <TableRow key={p.pointId}>
+              <Fragment key={p.pointId}>
+              <TableRow>
                 <TableCell className="align-top text-sm font-medium">
                   <span className="break-words">{p.name || p.pointId}</span>
                   <PointProps p={p} />
@@ -488,9 +641,18 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                           confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono"),
                       },
                       {
+                        label: editingId === p.pointId ? "Zamknij edycję" : "Edytuj punkt",
+                        onClick: () => setEditingId(editingId === p.pointId ? null : p.pointId),
+                      },
+                      {
                         label: "Zablokuj autora",
                         variant: "destructive",
                         onClick: () => actBlock(p.authorUid, p.authorName),
+                      },
+                      {
+                        label: "Usuń punkt",
+                        variant: "destructive",
+                        onClick: () => actDeletePoint(p.pointId, p.name),
                       },
                       ...(mapLink(p.lat, p.lon)
                         ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
@@ -499,6 +661,14 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                   />
                 </TableCell>
               </TableRow>
+                {editingId === p.pointId && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="p-2">
+                      <PointEditForm point={p} onDone={() => setEditingId(null)} />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             ))}
           </TableBody>
         </Table>
@@ -939,6 +1109,7 @@ function ContentTab() {
                           ...(p.state !== "rejected"
                             ? [{ label: "Odrzuć", variant: "destructive" as const, onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono", load) }]
                             : []),
+                          { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(p.pointId, p.name, load) },
                           ...(mapLink(p.lat, p.lon)
                             ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
                             : []),
