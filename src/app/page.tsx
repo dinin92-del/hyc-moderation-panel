@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
@@ -33,6 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   decide,
   setUserBlock,
@@ -576,7 +577,7 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
   );
 
   return (
-    <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+    <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">Nazwa</span>
@@ -628,6 +629,21 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
   );
 }
 
+// Edycja punktu zawsze w modalu (decyzja UX 0721) — bez rozwijania wierszy
+// tabeli; Esc/backdrop/Anuluj zamykają bez zapisu.
+function PointEditDialog({ point, onClose }: { point: DescriptionItem | null; onClose: () => void }) {
+  return (
+    <Dialog open={point !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      {point && (
+        <DialogContent>
+          <DialogTitle>Edytuj punkt — {point.name || point.pointId}</DialogTitle>
+          <PointEditForm point={point} onDone={onClose} />
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
 function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -649,8 +665,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
           </TableHeader>
           <TableBody>
             {visible.map((p) => (
-              <Fragment key={p.pointId}>
-              <TableRow>
+              <TableRow key={p.pointId}>
                 <TableCell className="align-top text-sm font-medium">
                   <span className="break-words">{p.name || p.pointId}</span>
                   <PointProps p={p} />
@@ -672,8 +687,8 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                     <KebabMenu
                       actions={[
                         {
-                          label: editingId === p.pointId ? "Zamknij edycję" : "Edytuj punkt",
-                          onClick: () => setEditingId(editingId === p.pointId ? null : p.pointId),
+                          label: "Edytuj punkt",
+                          onClick: () => setEditingId(p.pointId),
                         },
                         {
                           label: "Zablokuj autora",
@@ -693,18 +708,14 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                   </div>
                 </TableCell>
               </TableRow>
-                {editingId === p.pointId && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="p-2">
-                      <PointEditForm point={p} onDone={() => setEditingId(null)} />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
             ))}
           </TableBody>
         </Table>
       )}
+      <PointEditDialog
+        point={visible.find((p) => p.pointId === editingId) ?? null}
+        onClose={() => setEditingId(null)}
+      />
     </Section>
   );
 }
@@ -830,7 +841,7 @@ function ReportRow({ r }: { r: ReportItem }) {
 
 // Rozwinięty cel zgłoszenia = ten sam wzorzec akcji co wiersz kolejki:
 // [Opublikuj] [Ukryj] [⋯], a dla punktu/opisu w kebabie także „Edytuj punkt"
-// z tym samym inline formularzem co w kolejce opisów.
+// otwierające ten sam modal co w kolejce opisów.
 function ReportTarget({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem; isComment: boolean }) {
   const c = isComment ? (target as CommentItem) : null;
   const p = !isComment ? (target as DescriptionItem) : null;
@@ -845,8 +856,8 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
       ]
     : [
         {
-          label: editing ? "Zamknij edycję" : "Edytuj punkt",
-          onClick: () => setEditing((v) => !v),
+          label: "Edytuj punkt",
+          onClick: () => setEditing(true),
         },
         {
           label: "Usuń punkt",
@@ -896,11 +907,7 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
           <KebabMenu actions={kebab} />
         </div>
       </div>
-      {editing && p && (
-        <div className="mt-2 border-t pt-2">
-          <PointEditForm point={p} onDone={() => setEditing(false)} />
-        </div>
-      )}
+      <PointEditDialog point={editing && p ? p : null} onClose={() => setEditing(false)} />
     </div>
   );
 }
