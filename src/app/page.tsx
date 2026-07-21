@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, X } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
@@ -334,11 +334,14 @@ function TruncNote({ shown }: { shown: number }) {
   );
 }
 
-function Section({ title, count, children, truncated }: { title: string; count: number; children: React.ReactNode; truncated?: number }) {
+function Section({ title, count, children, truncated, legend }: { title: string; count: number; children: React.ReactNode; truncated?: number; legend?: string }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-muted-foreground">
-        {title} <span className="font-mono">({count})</span>
+      <h2 className="mb-2 flex flex-wrap items-baseline gap-x-3 text-sm font-semibold text-muted-foreground">
+        <span>
+          {title} <span className="font-mono">({count})</span>
+        </span>
+        {legend && <span className="text-xs font-normal">{legend}</span>}
       </h2>
       <div className="overflow-hidden rounded-lg border bg-background">
         {children}
@@ -365,12 +368,63 @@ function confirmReject(what: string) {
   return window.confirm(`Odrzucić ${what}? Treść zostanie ukryta.`);
 }
 
+// Jednolite objaśnienia skutku akcji moderacji — pokazywane jako tooltip na
+// przyciskach inline i jako podpis pod pozycją w kebabie. Jedno źródło copy,
+// żeby te same akcje wszędzie tłumaczyły się tak samo.
+const HINT_APPROVE_COMMENT = "Publikuje komentarz — będzie widoczny w aplikacji";
+const HINT_REJECT_COMMENT = "Ukrywa komentarz — nie będzie widoczny w aplikacji";
+const HINT_APPROVE_DESC = "Publikuje opis — będzie widoczny w aplikacji";
+const HINT_REJECT_DESC = "Ukrywa opis — nie będzie widoczny w aplikacji";
+const LEGEND_QUEUE = "Zatwierdź publikuje w aplikacji · Odrzuć ukrywa treść";
+
 type KebabAction = {
   label: string;
+  /** Krótki opis skutku, renderowany pod etykietą w menu. */
+  hint?: string;
   onClick?: () => void;
   href?: string;
   variant?: "default" | "destructive";
 };
+
+// Główna decyzja moderacyjna wyciągnięta z kebaba na wierzch wiersza: dwa
+// przyciski z ikoną, kolorem i tooltipem skutku (audyt 0717: „kebab 2-klik →
+// 1-klik inline"). Kebab zostaje na akcje drugorzędne.
+function ApproveRejectButtons({
+  approveHint,
+  rejectHint,
+  onApprove,
+  onReject,
+}: {
+  approveHint: string;
+  rejectHint: string;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <Button
+        size="sm"
+        variant="outline"
+        title={approveHint}
+        onClick={onApprove}
+        className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500 dark:hover:text-green-400"
+      >
+        <Check className="h-3.5 w-3.5" />
+        Zatwierdź
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        title={rejectHint}
+        onClick={onReject}
+        className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:border-red-600 hover:bg-red-600/10 hover:text-red-800 dark:text-red-500 dark:hover:text-red-400"
+      >
+        <X className="h-3.5 w-3.5" />
+        Odrzuć
+      </Button>
+    </div>
+  );
+}
 
 function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: string }) {
   if (actions.length === 0) return null;
@@ -399,7 +453,14 @@ function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: strin
                 : action.onClick
             }
           >
-            {action.label}
+            {action.hint ? (
+              <div className="flex max-w-64 flex-col items-start gap-0.5">
+                <span>{action.label}</span>
+                <span className="whitespace-normal text-xs text-muted-foreground">{action.hint}</span>
+              </div>
+            ) : (
+              action.label
+            )}
             {action.href && <ExternalLink className="ml-auto h-3 w-3 opacity-60" />}
           </DropdownMenuItem>
         ))}
@@ -411,7 +472,7 @@ function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: strin
 function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((c) => !c.isTest) : items;
   return (
-    <Section title="Komentarze do sprawdzenia" count={visible.length} truncated={items.length}>
+    <Section title="Komentarze do sprawdzenia" count={visible.length} truncated={items.length} legend={LEGEND_QUEUE}>
       {error ? (
         <QueueError message={error} />
       ) : visible.length === 0 ? (
@@ -424,7 +485,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
               <TableHead>Treść</TableHead>
               <TableHead className="w-20">Zgłosz.</TableHead>
               <TableHead className="w-28">Data</TableHead>
-              <TableHead className="w-12 text-right">Akcje</TableHead>
+              <TableHead className="w-60 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -448,26 +509,27 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
                 </TableCell>
                 <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(c.createdAt)}</TableCell>
                 <TableCell className="align-top text-right">
-                  <KebabMenu
-                    actions={[
-                      {
-                        label: "Zatwierdź",
-                        onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono"),
-                      },
-                      {
-                        label: "Odrzuć",
-                        variant: "destructive",
-                        onClick: () =>
-                          confirmReject("komentarz") &&
-                          act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono"),
-                      },
-                      {
-                        label: "Zablokuj autora",
-                        variant: "destructive",
-                        onClick: () => actBlock(c.authorUid, c.authorName),
-                      },
-                    ]}
-                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <ApproveRejectButtons
+                      approveHint={HINT_APPROVE_COMMENT}
+                      rejectHint={HINT_REJECT_COMMENT}
+                      onApprove={() => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono")}
+                      onReject={() =>
+                        confirmReject("komentarz") &&
+                        act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono")
+                      }
+                    />
+                    <KebabMenu
+                      actions={[
+                        {
+                          label: "Zablokuj autora",
+                          hint: "Autor nie doda nowych treści, dopóki go nie odblokujesz",
+                          variant: "destructive",
+                          onClick: () => actBlock(c.authorUid, c.authorName),
+                        },
+                      ]}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -598,7 +660,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
   const [editingId, setEditingId] = useState<string | null>(null);
   return (
-    <Section title="Opisy do sprawdzenia" count={visible.length} truncated={items.length}>
+    <Section title="Opisy do sprawdzenia" count={visible.length} truncated={items.length} legend={LEGEND_QUEUE}>
       {error ? (
         <QueueError message={error} />
       ) : visible.length === 0 ? (
@@ -610,7 +672,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
               <TableHead className="w-44">Punkt</TableHead>
               <TableHead>Opis</TableHead>
               <TableHead className="w-28">Data</TableHead>
-              <TableHead className="w-12 text-right">Akcje</TableHead>
+              <TableHead className="w-60 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -628,37 +690,39 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                 </TableCell>
                 <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(p.createdAt)}</TableCell>
                 <TableCell className="align-top text-right">
-                  <KebabMenu
-                    actions={[
-                      {
-                        label: "Zatwierdź",
-                        onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono"),
-                      },
-                      {
-                        label: "Odrzuć",
-                        variant: "destructive",
-                        onClick: () =>
-                          confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono"),
-                      },
-                      {
-                        label: editingId === p.pointId ? "Zamknij edycję" : "Edytuj punkt",
-                        onClick: () => setEditingId(editingId === p.pointId ? null : p.pointId),
-                      },
-                      {
-                        label: "Zablokuj autora",
-                        variant: "destructive",
-                        onClick: () => actBlock(p.authorUid, p.authorName),
-                      },
-                      {
-                        label: "Usuń punkt",
-                        variant: "destructive",
-                        onClick: () => actDeletePoint(p.pointId, p.name),
-                      },
-                      ...(mapLink(p.lat, p.lon)
-                        ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
-                        : []),
-                    ]}
-                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <ApproveRejectButtons
+                      approveHint={HINT_APPROVE_DESC}
+                      rejectHint={HINT_REJECT_DESC}
+                      onApprove={() => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono")}
+                      onReject={() =>
+                        confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono")
+                      }
+                    />
+                    <KebabMenu
+                      actions={[
+                        {
+                          label: editingId === p.pointId ? "Zamknij edycję" : "Edytuj punkt",
+                          onClick: () => setEditingId(editingId === p.pointId ? null : p.pointId),
+                        },
+                        {
+                          label: "Zablokuj autora",
+                          hint: "Autor nie doda nowych treści, dopóki go nie odblokujesz",
+                          variant: "destructive",
+                          onClick: () => actBlock(p.authorUid, p.authorName),
+                        },
+                        {
+                          label: "Usuń punkt",
+                          hint: "Trwale usuwa punkt z aplikacji razem z komentarzami",
+                          variant: "destructive",
+                          onClick: () => actDeletePoint(p.pointId, p.name),
+                        },
+                        ...(mapLink(p.lat, p.lon)
+                          ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
+                          : []),
+                      ]}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
                 {editingId === p.pointId && (
@@ -762,15 +826,16 @@ function ReportRow({ r }: { r: ReportItem }) {
         </TableCell>
         <TableCell className="align-top text-right">
           <KebabMenu
-            header="Zamyka tylko zgłoszenie. Treść ukryjesz osobno przez „Odrzuć opis/komentarz” po rozwinięciu wiersza."
             actions={[
               {
                 label: "Uznaj zgłoszenie i zamknij",
+                hint: "Zamyka tylko zgłoszenie — treść ukryjesz osobno po rozwinięciu wiersza",
                 onClick: () =>
                   act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte (zasadne)"),
               },
               {
                 label: "Odrzuć zgłoszenie jako niezasadne",
+                hint: "Zamyka zgłoszenie bez zmian — treść zostaje widoczna",
                 variant: "destructive",
                 onClick: () =>
                   act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)"),
@@ -801,17 +866,27 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
   const p = !isComment ? (target as DescriptionItem) : null;
   const actions: KebabAction[] = isComment
     ? [
-        { label: "Zatwierdź komentarz", onClick: () => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Zatwierdzono") },
+        {
+          label: "Zatwierdź komentarz",
+          hint: HINT_APPROVE_COMMENT,
+          onClick: () => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Zatwierdzono"),
+        },
         {
           label: "Odrzuć komentarz",
+          hint: HINT_REJECT_COMMENT,
           variant: "destructive",
           onClick: () => confirmReject("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Odrzucono"),
         },
       ]
     : [
-        { label: "Zatwierdź opis", onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Zatwierdzono") },
+        {
+          label: "Zatwierdź opis",
+          hint: HINT_APPROVE_DESC,
+          onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Zatwierdzono"),
+        },
         {
           label: "Odrzuć opis",
+          hint: HINT_REJECT_DESC,
           variant: "destructive",
           onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Odrzucono"),
         },
@@ -1057,11 +1132,12 @@ function ContentTab() {
                       <KebabMenu
                         actions={[
                           ...(c.state !== "approved"
-                            ? [{ label: "Zatwierdź", onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono", load) }]
+                            ? [{ label: "Zatwierdź", hint: HINT_APPROVE_COMMENT, onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono", load) }]
                             : []),
                           ...(c.status !== "removed"
                             ? [{
                                 label: "Odrzuć",
+                                hint: HINT_REJECT_COMMENT,
                                 variant: "destructive" as const,
                                 onClick: () => confirmReject("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono", load),
                               }]
@@ -1104,12 +1180,12 @@ function ContentTab() {
                       <KebabMenu
                         actions={[
                           ...(p.state !== "approved"
-                            ? [{ label: "Zatwierdź", onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono", load) }]
+                            ? [{ label: "Zatwierdź", hint: HINT_APPROVE_DESC, onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono", load) }]
                             : []),
                           ...(p.state !== "rejected"
-                            ? [{ label: "Odrzuć", variant: "destructive" as const, onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono", load) }]
+                            ? [{ label: "Odrzuć", hint: HINT_REJECT_DESC, variant: "destructive" as const, onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono", load) }]
                             : []),
-                          { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(p.pointId, p.name, load) },
+                          { label: "Usuń punkt", hint: "Trwale usuwa punkt z aplikacji razem z komentarzami", variant: "destructive" as const, onClick: () => actDeletePoint(p.pointId, p.name, load) },
                           ...(mapLink(p.lat, p.lon)
                             ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
                             : []),
