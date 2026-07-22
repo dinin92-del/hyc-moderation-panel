@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
@@ -33,6 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   decide,
   setUserBlock,
@@ -361,8 +362,8 @@ function Empty({ text }: { text: string }) {
   return <div className="px-4 py-6 text-sm text-muted-foreground">{text}</div>;
 }
 
-function confirmReject(what: string) {
-  return window.confirm(`Odrzucić ${what}? Treść zostanie ukryta.`);
+function confirmHide(what: string) {
+  return window.confirm(`Ukryć ${what}? Nie będzie widoczny w aplikacji.`);
 }
 
 type KebabAction = {
@@ -371,6 +372,42 @@ type KebabAction = {
   href?: string;
   variant?: "default" | "destructive";
 };
+
+// Decyzja moderacyjna widoczna w wierszu (1 klik), nazwana SKUTKIEM —
+// „Opublikuj"/„Ukryj" tłumaczą się same, bez legend i tooltipów z esejem.
+// Ten sam komponent na każdej powierzchni (kolejki, zgłoszenia, przeglądarka);
+// przycisk renderuje się tylko, gdy akcja ma sens w bieżącym stanie treści.
+function PublishHideButtons({ onPublish, onHide }: { onPublish?: () => void; onHide?: () => void }) {
+  if (!onPublish && !onHide) return null;
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      {onPublish && (
+        <Button
+          size="sm"
+          variant="outline"
+          title="Treść będzie widoczna w aplikacji"
+          onClick={onPublish}
+          className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500 dark:hover:text-green-400"
+        >
+          <Check className="h-3.5 w-3.5" />
+          Opublikuj
+        </Button>
+      )}
+      {onHide && (
+        <Button
+          size="sm"
+          variant="outline"
+          title="Treść zniknie z aplikacji"
+          onClick={onHide}
+          className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:border-red-600 hover:bg-red-600/10 hover:text-red-800 dark:text-red-500 dark:hover:text-red-400"
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          Ukryj
+        </Button>
+      )}
+    </div>
+  );
+}
 
 function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: string }) {
   if (actions.length === 0) return null;
@@ -424,7 +461,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
               <TableHead>Treść</TableHead>
               <TableHead className="w-20">Zgłosz.</TableHead>
               <TableHead className="w-28">Data</TableHead>
-              <TableHead className="w-12 text-right">Akcje</TableHead>
+              <TableHead className="w-60 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -448,26 +485,24 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
                 </TableCell>
                 <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(c.createdAt)}</TableCell>
                 <TableCell className="align-top text-right">
-                  <KebabMenu
-                    actions={[
-                      {
-                        label: "Zatwierdź",
-                        onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono"),
-                      },
-                      {
-                        label: "Odrzuć",
-                        variant: "destructive",
-                        onClick: () =>
-                          confirmReject("komentarz") &&
-                          act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono"),
-                      },
-                      {
-                        label: "Zablokuj autora",
-                        variant: "destructive",
-                        onClick: () => actBlock(c.authorUid, c.authorName),
-                      },
-                    ]}
-                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <PublishHideButtons
+                      onPublish={() => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Opublikowano")}
+                      onHide={() =>
+                        confirmHide("komentarz") &&
+                        act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto")
+                      }
+                    />
+                    <KebabMenu
+                      actions={[
+                        {
+                          label: "Zablokuj autora",
+                          variant: "destructive",
+                          onClick: () => actBlock(c.authorUid, c.authorName),
+                        },
+                      ]}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -542,7 +577,7 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
   );
 
   return (
-    <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+    <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">Nazwa</span>
@@ -594,6 +629,21 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
   );
 }
 
+// Edycja punktu zawsze w modalu (decyzja UX 0721) — bez rozwijania wierszy
+// tabeli; Esc/backdrop/Anuluj zamykają bez zapisu.
+function PointEditDialog({ point, onClose }: { point: DescriptionItem | null; onClose: () => void }) {
+  return (
+    <Dialog open={point !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      {point && (
+        <DialogContent>
+          <DialogTitle>Edytuj punkt — {point.name || point.pointId}</DialogTitle>
+          <PointEditForm point={point} onDone={onClose} />
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
 function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -610,13 +660,12 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
               <TableHead className="w-44">Punkt</TableHead>
               <TableHead>Opis</TableHead>
               <TableHead className="w-28">Data</TableHead>
-              <TableHead className="w-12 text-right">Akcje</TableHead>
+              <TableHead className="w-60 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {visible.map((p) => (
-              <Fragment key={p.pointId}>
-              <TableRow>
+              <TableRow key={p.pointId}>
                 <TableCell className="align-top text-sm font-medium">
                   <span className="break-words">{p.name || p.pointId}</span>
                   <PointProps p={p} />
@@ -628,51 +677,45 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                 </TableCell>
                 <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(p.createdAt)}</TableCell>
                 <TableCell className="align-top text-right">
-                  <KebabMenu
-                    actions={[
-                      {
-                        label: "Zatwierdź",
-                        onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono"),
-                      },
-                      {
-                        label: "Odrzuć",
-                        variant: "destructive",
-                        onClick: () =>
-                          confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono"),
-                      },
-                      {
-                        label: editingId === p.pointId ? "Zamknij edycję" : "Edytuj punkt",
-                        onClick: () => setEditingId(editingId === p.pointId ? null : p.pointId),
-                      },
-                      {
-                        label: "Zablokuj autora",
-                        variant: "destructive",
-                        onClick: () => actBlock(p.authorUid, p.authorName),
-                      },
-                      {
-                        label: "Usuń punkt",
-                        variant: "destructive",
-                        onClick: () => actDeletePoint(p.pointId, p.name),
-                      },
-                      ...(mapLink(p.lat, p.lon)
-                        ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
-                        : []),
-                    ]}
-                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <PublishHideButtons
+                      onPublish={() => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano")}
+                      onHide={() =>
+                        confirmHide("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Ukryto")
+                      }
+                    />
+                    <KebabMenu
+                      actions={[
+                        {
+                          label: "Edytuj punkt",
+                          onClick: () => setEditingId(p.pointId),
+                        },
+                        {
+                          label: "Zablokuj autora",
+                          variant: "destructive",
+                          onClick: () => actBlock(p.authorUid, p.authorName),
+                        },
+                        {
+                          label: "Usuń punkt",
+                          variant: "destructive",
+                          onClick: () => actDeletePoint(p.pointId, p.name),
+                        },
+                        ...(mapLink(p.lat, p.lon)
+                          ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
+                          : []),
+                      ]}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
-                {editingId === p.pointId && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="p-2">
-                      <PointEditForm point={p} onDone={() => setEditingId(null)} />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
             ))}
           </TableBody>
         </Table>
       )}
+      <PointEditDialog
+        point={visible.find((p) => p.pointId === editingId) ?? null}
+        onClose={() => setEditingId(null)}
+      />
     </Section>
   );
 }
@@ -762,7 +805,7 @@ function ReportRow({ r }: { r: ReportItem }) {
         </TableCell>
         <TableCell className="align-top text-right">
           <KebabMenu
-            header="Zamyka tylko zgłoszenie. Treść ukryjesz osobno przez „Odrzuć opis/komentarz” po rozwinięciu wiersza."
+            header="Zamyka tylko zgłoszenie — treścią i punktem zarządzasz po rozwinięciu wiersza."
             actions={[
               {
                 label: "Uznaj zgłoszenie i zamknij",
@@ -796,51 +839,75 @@ function ReportRow({ r }: { r: ReportItem }) {
   );
 }
 
+// Rozwinięty cel zgłoszenia = ten sam wzorzec akcji co wiersz kolejki:
+// [Opublikuj] [Ukryj] [⋯], a dla punktu/opisu w kebabie także „Edytuj punkt"
+// otwierające ten sam modal co w kolejce opisów.
 function ReportTarget({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem; isComment: boolean }) {
   const c = isComment ? (target as CommentItem) : null;
   const p = !isComment ? (target as DescriptionItem) : null;
-  const actions: KebabAction[] = isComment
+  const [editing, setEditing] = useState(false);
+  const kebab: KebabAction[] = c
     ? [
-        { label: "Zatwierdź komentarz", onClick: () => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Zatwierdzono") },
         {
-          label: "Odrzuć komentarz",
+          label: "Zablokuj autora",
           variant: "destructive",
-          onClick: () => confirmReject("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Odrzucono"),
+          onClick: () => actBlock(c.authorUid, c.authorName),
         },
       ]
     : [
-        { label: "Zatwierdź opis", onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Zatwierdzono") },
         {
-          label: "Odrzuć opis",
+          label: "Edytuj punkt",
+          onClick: () => setEditing(true),
+        },
+        {
+          label: "Usuń punkt",
           variant: "destructive",
-          onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Odrzucono"),
+          onClick: () => actDeletePoint(r.pointId, p?.name ?? ""),
         },
         ...(p && mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
       ];
   return (
-    <div className="flex items-start justify-between gap-3 py-1">
-      <div className="min-w-0 text-sm">
-        {c && (
-          <>
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-medium">{c.authorName || "Użytkownik"}</span>
-              <StateBadge state={c.state} />
-            </div>
-            <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
-          </>
-        )}
-        {p && (
-          <>
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-medium">{p.name || p.pointId}</span>
-              <StateBadge state={p.state} />
-            </div>
-            <PointProps p={p} />
-            <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
-          </>
-        )}
+    <div className="py-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 text-sm">
+          {c && (
+            <>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="font-medium">{c.authorName || "Użytkownik"}</span>
+                <StateBadge state={c.state} />
+              </div>
+              <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
+            </>
+          )}
+          {p && (
+            <>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="font-medium">{p.name || p.pointId}</span>
+                <StateBadge state={p.state} />
+              </div>
+              <PointProps p={p} />
+              <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
+            </>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {c ? (
+            <PublishHideButtons
+              onPublish={() => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Opublikowano")}
+              onHide={() =>
+                confirmHide("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Ukryto")
+              }
+            />
+          ) : (
+            <PublishHideButtons
+              onPublish={() => act({ action: "approveDescription", pointId: r.pointId }, "Opublikowano")}
+              onHide={() => confirmHide("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Ukryto")}
+            />
+          )}
+          <KebabMenu actions={kebab} />
+        </div>
       </div>
-      <KebabMenu actions={actions} />
+      <PointEditDialog point={editing && p ? p : null} onClose={() => setEditing(false)} />
     </div>
   );
 }
@@ -1036,7 +1103,7 @@ function ContentTab() {
                   <TableHead>Treść</TableHead>
                   <TableHead className="w-28">Stan</TableHead>
                   <TableHead className="w-28">Status</TableHead>
-                  <TableHead className="w-12 text-right">Akcje</TableHead>
+                  <TableHead className="w-52 text-right">Akcje</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1054,19 +1121,17 @@ function ContentTab() {
                     <TableCell className="align-top"><StateBadge state={c.state} /></TableCell>
                     <TableCell className="align-top"><StatusBadge status={c.status} /></TableCell>
                     <TableCell className="align-top text-right">
-                      <KebabMenu
-                        actions={[
-                          ...(c.state !== "approved"
-                            ? [{ label: "Zatwierdź", onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Zatwierdzono", load) }]
-                            : []),
-                          ...(c.status !== "removed"
-                            ? [{
-                                label: "Odrzuć",
-                                variant: "destructive" as const,
-                                onClick: () => confirmReject("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Odrzucono", load),
-                              }]
-                            : []),
-                        ]}
+                      <PublishHideButtons
+                        onPublish={
+                          c.state !== "approved"
+                            ? () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Opublikowano", load)
+                            : undefined
+                        }
+                        onHide={
+                          c.status !== "removed"
+                            ? () => confirmHide("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto", load)
+                            : undefined
+                        }
                       />
                     </TableCell>
                   </TableRow>
@@ -1085,7 +1150,7 @@ function ContentTab() {
                   <TableHead className="w-44">Punkt</TableHead>
                   <TableHead>Opis</TableHead>
                   <TableHead className="w-28">Stan</TableHead>
-                  <TableHead className="w-12 text-right">Akcje</TableHead>
+                  <TableHead className="w-60 text-right">Akcje</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1101,20 +1166,28 @@ function ContentTab() {
                     </TableCell>
                     <TableCell className="align-top"><StateBadge state={p.state} /></TableCell>
                     <TableCell className="align-top text-right">
+                      <div className="flex items-center justify-end gap-1">
+                      <PublishHideButtons
+                        onPublish={
+                          p.state !== "approved"
+                            ? () => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano", load)
+                            : undefined
+                        }
+                        onHide={
+                          p.state !== "rejected"
+                            ? () => confirmHide("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Ukryto", load)
+                            : undefined
+                        }
+                      />
                       <KebabMenu
                         actions={[
-                          ...(p.state !== "approved"
-                            ? [{ label: "Zatwierdź", onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Zatwierdzono", load) }]
-                            : []),
-                          ...(p.state !== "rejected"
-                            ? [{ label: "Odrzuć", variant: "destructive" as const, onClick: () => confirmReject("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Odrzucono", load) }]
-                            : []),
                           { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(p.pointId, p.name, load) },
                           ...(mapLink(p.lat, p.lon)
                             ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
                             : []),
                         ]}
                       />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
