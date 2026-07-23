@@ -306,6 +306,60 @@ export async function editPoint(pointId: string, fields: PointEditFields): Promi
   await fn({ pointId, fields });
 }
 
+// ── Ręczne dodanie punktu (callable onModeratorCreatePoint) ──────────────────
+// Punkt powstaje jako `points/UGC:<autoId>` — kuratorowana baza siedzi w
+// ZBUNDLOWANYM assecie apki, więc dopisanie do niej wymagałoby nowego wydania.
+// Serwer zapisuje moderation=human/approved + contentHash (bez re-moderacji Gemini)
+// i podpisuje punkt jako „Zespół Hyc!". Opis opcjonalny — punkt bez opisu też jest
+// widoczny na mapie (apka pokaże baner „Zostań pionierem").
+export type PointCreateFields = {
+  name: string;
+  type: string;
+  lat: number;
+  lon: number;
+  description?: string;
+  waterNearby?: boolean;
+  fireSpot?: boolean;
+  overnight?: boolean;
+  emergencyShelter?: boolean;
+};
+
+/**
+ * Punkty dodane ręcznie z panelu (`createdVia == "moderation-panel"`) — live.
+ * Osobny strumień, bo lista „Wszystkie treści" pokazuje tylko punkty Z OPISEM, a
+ * ręczny punkt bez opisu jest legalny — bez tego widoku nie dałoby się go potem
+ * ani poprawić, ani usunąć. Sort po dacie w kliencie (bez indeksu złożonego).
+ */
+export function watchManualPoints(
+  cb: (items: DescriptionItem[]) => void,
+  onErr: (e: unknown) => void,
+) {
+  const q = query(
+    collection(db, "points"),
+    where("createdVia", "==", "moderation-panel"),
+    limit(BROWSE_LIMIT),
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const out = snap.docs.map((d) => mapDescription(d.data(), d.id));
+      out.sort(byNewest);
+      cb(out);
+    },
+    onErr,
+  );
+}
+
+/** Tworzy nowy punkt UGC. Zwraca nadane `UGC:<id>`. */
+export async function createPoint(fields: PointCreateFields): Promise<string> {
+  const fn = httpsCallable<{ fields: PointCreateFields }, { pointId: string }>(
+    functions,
+    "onModeratorCreatePoint",
+  );
+  const res = await fn({ fields });
+  return res.data.pointId;
+}
+
 /** Twarde usunięcie punktu (+ kaskada komentarzy) z bazy. Nieodwracalne. */
 export async function deletePoint(pointId: string): Promise<void> {
   const fn = httpsCallable(functions, "onModeratorDeletePoint");

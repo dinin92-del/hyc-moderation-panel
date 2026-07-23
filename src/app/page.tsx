@@ -40,6 +40,8 @@ import {
   unblockUser,
   deletePoint,
   editPoint,
+  createPoint,
+  type PointCreateFields,
   type PointEditFields,
   fetchAllComments,
   fetchAllDescriptions,
@@ -50,7 +52,9 @@ import {
   watchDescriptionsQueue,
   watchReportsQueue,
   watchBlockedUsers,
+  watchManualPoints,
   QUEUE_LIMIT,
+  BROWSE_LIMIT,
   type CommentItem,
   type DescriptionItem,
   type LogItem,
@@ -207,6 +211,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
         <Tabs defaultValue="queue">
           <TabsList>
             <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
+            <TabsTrigger value="add">Dodaj punkt</TabsTrigger>
             <TabsTrigger value="history">Historia decyzji</TabsTrigger>
             <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
             <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
@@ -227,6 +232,10 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
             <QueueReports items={reports} error={reportsErr} hideTest={hideTest} />
           </TabsContent>
 
+          <TabsContent value="add" className="pt-4">
+            <AddPointTab />
+          </TabsContent>
+
           <TabsContent value="history" className="pt-4">
             <HistoryTab />
           </TabsContent>
@@ -244,27 +253,39 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
   );
 }
 
+// AKTUALNA taksonomia (lustro `ShelterType` w lib/core/models/shelter.dart —
+// kolejność = priorytet enuma). To jedyne kody, które wolno WYBRAĆ przy dodawaniu
+// i edycji; backend odrzuca resztę (whitelist w applyModeratorCreatePoint).
+const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
+  ["schronisko", "Schronisko"],
+  ["nocleg", "Nocleg"],
+  ["bacowka", "Bacówka"],
+  ["sklep", "Sklep"],
+  ["stanica", "Stanica"],
+  ["baza_namiotowa", "Baza namiotowa"],
+  ["chatka", "Chatka"],
+  ["restauracja", "Gastronomia"],
+  ["obserwacyjne", "Obserwacyjne"],
+  ["schronienie_skalne", "Schronienie skalne"],
+  ["opuszczone", "Opuszczony obiekt"],
+  ["miejsce_biwakowe", "Baza biwakowa"],
+  ["wiata", "Wiata"],
+  ["schronienie", "Schronienie"],
+  ["przystanek", "Wiata przystankowa"],
+  ["nieznane", "Typ nieznany"],
+];
+
+// Etykiety do WYŚWIETLANIA — taksonomia aktualna + kody wycofane, które mogą
+// jeszcze siedzieć w starych dokumentach (alias `dom_turysty`, kategorie usunięte
+// 07/2026). Wycofanych NIE ma w [TAXONOMY_OPTIONS], więc nie da się ich wybrać.
 const SHELTER_TYPE_LABEL: Record<string, string> = {
-  schronisko: "Schronisko",
-  nocleg: "Nocleg",
+  ...Object.fromEntries(TAXONOMY_OPTIONS),
   dom_turysty: "Nocleg",
-  bacowka: "Bacówka",
-  restauracja: "Restauracja",
-  stanica: "Stanica",
-  baza_namiotowa: "Baza namiotowa",
-  miejsce_biwakowe: "Baza biwakowa",
-  chatka: "Chatka",
-  obserwacyjne: "Czatownia",
-  schronienie_skalne: "Schronienie skalne",
-  parking_zadaszony: "Zadaszony parking",
-  wiata_rowerowa: "Wiata rowerowa",
-  altana: "Altana",
-  daszek: "Daszek",
-  wiata: "Wiata",
-  schronienie: "Schronienie",
-  pasnik: "Paśnik",
-  przystanek: "Wiata przystankowa",
-  nieznane: "Typ nieznany",
+  parking_zadaszony: "Zadaszony parking (wycofane)",
+  wiata_rowerowa: "Wiata rowerowa (wycofane)",
+  altana: "Altana (wycofane)",
+  daszek: "Daszek (wycofane)",
+  pasnik: "Paśnik (wycofane)",
 };
 
 const POINT_ATTRS: Array<{
@@ -588,7 +609,7 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
           <Select value={type} onValueChange={(v) => setType(v ?? "")}>
             <SelectTrigger><SelectValue placeholder="Wybierz typ" /></SelectTrigger>
             <SelectContent>
-              {Object.entries(SHELTER_TYPE_LABEL).map(([code, label]) => (
+              {TAXONOMY_OPTIONS.map(([code, label]) => (
                 <SelectItem key={code} value={code}>{label}</SelectItem>
               ))}
             </SelectContent>
@@ -641,6 +662,298 @@ function PointEditDialog({ point, onClose }: { point: DescriptionItem | null; on
         </DialogContent>
       )}
     </Dialog>
+  );
+}
+
+// ── Ręczne dodawanie punktu ──────────────────────────────────────────────────
+
+/** Bounding box PL + pas 50 km (zasięg danych). Poza nim = ostrzeżenie, nie blokada. */
+const PL_BBOX = { latMin: 48.4, latMax: 55.5, lonMin: 13.3, lonMax: 25.0 };
+
+function toNumber(v: string): number {
+  // „49,412" (przecinek dziesiętny) i „49.412," (ogon po wklejeniu pary).
+  return Number(v.trim().replace(/,$/, "").replace(",", "."));
+}
+
+/**
+ * Wyłuskuje parę współrzędnych z jednego wklejenia: „49.412, 20.712",
+ * „49,412 20,712", link Google Maps (`@lat,lon` / `?q=lat,lon`) albo mapy.cz
+ * (`x=lon&y=lat`). Zwraca null, gdy nie da się odczytać pary liczb.
+ */
+function parseLatLon(raw: string): { lat: number; lon: number } | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const g = s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) ?? s.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (g) return { lat: Number(g[1]), lon: Number(g[2]) };
+  const mx = s.match(/[?&]x=(-?\d+\.\d+)/);
+  const my = s.match(/[?&]y=(-?\d+\.\d+)/);
+  if (mx && my) return { lat: Number(my[1]), lon: Number(mx[1]) }; // mapy.cz: x=lon, y=lat
+  const parts = /[\s;]/.test(s) ? s.split(/[\s;]+/) : s.split(",");
+  if (parts.length !== 2) return null;
+  const lat = toNumber(parts[0]);
+  const lon = toNumber(parts[1]);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+}
+
+/**
+ * Formularz ręcznego dodania punktu (nazwa/kategoria/współrzędne/opis/flagi).
+ * Punkt idzie przez callable `onModeratorCreatePoint` i jest widoczny w apce od
+ * razu (UGC, approved) — bez czekania na moderację i bez wydania nowej wersji.
+ * Formularz po zapisie czyści treść, ale ZOSTAWIA kategorię i flagi: wpisywanie
+ * serii punktów tego samego typu to główny scenariusz (import z listy adresów).
+ */
+function AddPointTab() {
+  const [name, setName] = useState("");
+  const [type, setType] = useState("");
+  const [lat, setLat] = useState("");
+  const [lon, setLon] = useState("");
+  const [description, setDescription] = useState("");
+  const [waterNearby, setWaterNearby] = useState(false);
+  const [fireSpot, setFireSpot] = useState(false);
+  const [overnight, setOvernight] = useState(false);
+  const [emergencyShelter, setEmergencyShelter] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [manual, setManual] = useState<DescriptionItem[]>([]);
+  const [manualErr, setManualErr] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => watchManualPoints(
+    (items) => { setManualErr(null); setManual(items); },
+    () => setManualErr("Nie udało się wczytać listy dodanych punktów."),
+  ), []);
+
+  // Wklejenie pary („49.412, 20.712" lub link z mapy) w pole szerokości rozbija
+  // się na oba pola — przy przepisywaniu z listy to najczęstszy ruch.
+  function onLatPaste(text: string) {
+    const parsed = parseLatLon(text);
+    if (!parsed) return false;
+    setLat(String(parsed.lat));
+    setLon(String(parsed.lon));
+    return true;
+  }
+
+  const latNum = toNumber(lat);
+  const lonNum = toNumber(lon);
+  const coordsOk =
+    lat.trim() !== "" && lon.trim() !== "" &&
+    Number.isFinite(latNum) && Number.isFinite(lonNum) &&
+    latNum >= -90 && latNum <= 90 && lonNum >= -180 && lonNum <= 180;
+  const outsidePl = coordsOk && (
+    latNum < PL_BBOX.latMin || latNum > PL_BBOX.latMax ||
+    lonNum < PL_BBOX.lonMin || lonNum > PL_BBOX.lonMax
+  );
+  const canSubmit = name.trim() !== "" && type !== "" && coordsOk && !saving;
+
+  async function submit() {
+    if (!canSubmit) return;
+    const fields: PointCreateFields = {
+      name: name.trim(),
+      type,
+      lat: latNum,
+      lon: lonNum,
+      waterNearby,
+      fireSpot,
+      overnight,
+      emergencyShelter,
+    };
+    if (description.trim() !== "") fields.description = description.trim();
+    setSaving(true);
+    try {
+      await createPoint(fields);
+      toast.success("Punkt dodany — widoczny w apce");
+      // Treść czyścimy, kategorię/flagi zostawiamy pod kolejny punkt z serii.
+      setName("");
+      setLat("");
+      setLon("");
+      setDescription("");
+    } catch (e) {
+      toast.error("Nie udało się dodać: " + (e instanceof Error ? e.message : "błąd"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const flag = (label: string, checked: boolean, set: (v: boolean) => void) => (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} />
+      {label}
+    </label>
+  );
+
+  return (
+    <div className="space-y-6">
+      <section className="max-w-3xl rounded-lg border bg-background p-4">
+        <header className="mb-3 space-y-1">
+          <h2 className="text-sm font-semibold">Nowy punkt</h2>
+          <p className="text-xs text-muted-foreground">
+            Punkt trafia do bazy jako wpis moderatora (podpis „Zespół Hyc!”) i jest widoczny
+            w aplikacji od razu — bez kolejki moderacji. Opis jest opcjonalny; bez niego apka
+            pokaże przy punkcie zaproszenie „Zostań pionierem”.
+          </p>
+        </header>
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Nazwa *</span>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="np. Bacówka nad Wierchomlą"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Kategoria *</span>
+              <Select value={type} onValueChange={(v) => setType(v ?? "")}>
+                <SelectTrigger><SelectValue placeholder="Wybierz kategorię" /></SelectTrigger>
+                <SelectContent>
+                  {TAXONOMY_OPTIONS.map(([code, label]) => (
+                    <SelectItem key={code} value={code}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Szerokość (lat) *</span>
+              <Input
+                value={lat}
+                inputMode="decimal"
+                placeholder="49.412 — można wkleić parę albo link z mapy"
+                onChange={(e) => { if (!onLatPaste(e.target.value)) setLat(e.target.value); }}
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Długość (lon) *</span>
+              <Input
+                value={lon}
+                inputMode="decimal"
+                placeholder="20.712"
+                onChange={(e) => setLon(e.target.value)}
+              />
+            </label>
+          </div>
+          {lat.trim() !== "" && lon.trim() !== "" && !coordsOk && (
+            <p className="text-xs text-red-600">Współrzędne nieprawidłowe — sprawdź liczby.</p>
+          )}
+          {outsidePl && (
+            <p className="text-xs text-amber-600">
+              Uwaga: punkt leży poza Polską i pasem 50 km — czy szerokość z długością nie są
+              zamienione miejscami?
+            </p>
+          )}
+          {coordsOk && (
+            <a
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground underline"
+              href={mapLink(latNum, lonNum)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Sprawdź na mapie <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+
+          <label className="block space-y-1 text-sm">
+            <span className="text-muted-foreground">Opis (opcjonalny)</span>
+            <textarea
+              className="min-h-24 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Co user zastanie na miejscu"
+            />
+          </label>
+
+          <div className="flex flex-wrap gap-4">
+            {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
+            {flag("Miejsce na ogień", fireSpot, setFireSpot)}
+            {flag("Nocleg", overnight, setOvernight)}
+            {flag("Schronienie awaryjne", emergencyShelter, setEmergencyShelter)}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={submit} disabled={!canSubmit}>
+              {saving ? "Dodawanie…" : "Dodaj punkt"}
+            </Button>
+            <span className="text-xs text-muted-foreground">* pola wymagane</span>
+          </div>
+        </div>
+      </section>
+
+      <Section title="Dodane ręcznie" count={manual.length}>
+        {manualErr ? (
+          <QueueError message={manualErr} />
+        ) : manual.length === 0 ? (
+          <Empty text="Nie dodano jeszcze żadnego punktu z panelu." />
+        ) : (
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-56">Punkt</TableHead>
+                <TableHead>Opis</TableHead>
+                <TableHead className="w-40">Współrzędne</TableHead>
+                <TableHead className="w-28">Data</TableHead>
+                <TableHead className="w-16 text-right">Akcje</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {manual.map((p) => (
+                <TableRow key={p.pointId}>
+                  <TableCell className="align-top text-sm font-medium">
+                    <span className="break-words">{p.name || p.pointId}</span>
+                    <PointProps p={p} />
+                  </TableCell>
+                  <TableCell className="align-top text-sm">
+                    {p.description ? (
+                      <p className="whitespace-pre-wrap break-words">{p.description}</p>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">bez opisu</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top text-xs text-muted-foreground">
+                    {p.lat !== null && p.lon !== null && (
+                      <a
+                        className="inline-flex items-center gap-1 underline"
+                        href={mapLink(p.lat, p.lon)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {p.lat.toFixed(5)}, {p.lon.toFixed(5)}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top font-mono text-xs text-muted-foreground">
+                    {fmtDate(p.createdAt)}
+                  </TableCell>
+                  <TableCell className="align-top text-right">
+                    <KebabMenu
+                      actions={[
+                        { label: "Edytuj punkt", onClick: () => setEditingId(p.pointId) },
+                        {
+                          label: "Usuń punkt",
+                          variant: "destructive",
+                          onClick: () => actDeletePoint(p.pointId, p.name),
+                        },
+                      ]}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        {manual.length >= BROWSE_LIMIT && (
+          <div className="border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
+            ⚠ Pokazano pierwsze {BROWSE_LIMIT} punktów — lista jest dłuższa.
+          </div>
+        )}
+        <PointEditDialog
+          point={manual.find((p) => p.pointId === editingId) ?? null}
+          onClose={() => setEditingId(null)}
+        />
+      </Section>
+    </div>
   );
 }
 
