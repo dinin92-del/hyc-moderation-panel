@@ -548,6 +548,7 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
   const [fireSpot, setFireSpot] = useState(point.fireSpot);
   const [overnight, setOvernight] = useState(point.overnight);
   const [emergencyShelter, setEmergencyShelter] = useState(point.emergencyShelter);
+  const [phone, setPhone] = useState(point.phone ?? "");
   const [saving, setSaving] = useState(false);
 
   async function submit() {
@@ -573,6 +574,9 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
     if (emergencyShelter !== point.emergencyShelter) {
       fields.emergencyShelter = emergencyShelter;
     }
+    // Pusty input = czyszczenie numeru (null w dokumencie). Format waliduje
+    // callable (sanitizePhone) — panel nie duplikuje reguł.
+    if (phone.trim() !== (point.phone ?? "")) fields.phone = phone.trim() || null;
     if (Object.keys(fields).length === 0) return toast("Brak zmian do zapisania");
     setSaving(true);
     try {
@@ -634,6 +638,15 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
           <Input value={lon} onChange={(e) => setLon(e.target.value)} inputMode="decimal" />
         </label>
       </div>
+      <label className="block space-y-1 text-sm sm:max-w-xs">
+        <span className="text-muted-foreground">Telefon (opcjonalny)</span>
+        <Input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          inputMode="tel"
+          placeholder="+48 902 092 012"
+        />
+      </label>
       <div className="flex flex-wrap gap-4">
         {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
         {flag("Miejsce na ogień", fireSpot, setFireSpot)}
@@ -712,6 +725,7 @@ function AddPointTab() {
   const [fireSpot, setFireSpot] = useState(false);
   const [overnight, setOvernight] = useState(false);
   const [emergencyShelter, setEmergencyShelter] = useState(false);
+  const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const [manual, setManual] = useState<DescriptionItem[]>([]);
   const [manualErr, setManualErr] = useState<string | null>(null);
@@ -757,15 +771,18 @@ function AddPointTab() {
       emergencyShelter,
     };
     if (description.trim() !== "") fields.description = description.trim();
+    if (phone.trim() !== "") fields.phone = phone.trim();
     setSaving(true);
     try {
       await createPoint(fields);
       toast.success("Punkt dodany — widoczny w apce");
       // Treść czyścimy, kategorię/flagi zostawiamy pod kolejny punkt z serii.
+      // Telefon też czyścimy — numer jest per-punkt, nie per-seria.
       setName("");
       setLat("");
       setLon("");
       setDescription("");
+      setPhone("");
     } catch (e) {
       toast.error("Nie udało się dodać: " + (e instanceof Error ? e.message : "błąd"));
     } finally {
@@ -861,6 +878,16 @@ function AddPointTab() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Co user zastanie na miejscu"
+            />
+          </label>
+
+          <label className="block space-y-1 text-sm sm:max-w-xs">
+            <span className="text-muted-foreground">Telefon (opcjonalny)</span>
+            <Input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              inputMode="tel"
+              placeholder="+48 902 092 012"
             />
           </label>
 

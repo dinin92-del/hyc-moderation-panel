@@ -63,6 +63,8 @@ export type DescriptionItem = {
   fireSpot: boolean;
   overnight: boolean;
   emergencyShelter: boolean;
+  /** Numer kontaktowy punktu — pole SERWEROWE, wpisywane tylko z panelu. */
+  phone: string | null;
 };
 
 export type ReportItem = {
@@ -132,6 +134,7 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     fireSpot: !!d.fireSpot,
     overnight: !!d.overnight,
     emergencyShelter: !!d.emergencyShelter,
+    phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
   };
 }
 
@@ -298,6 +301,8 @@ export type PointEditFields = Partial<{
   fireSpot: boolean;
   overnight: boolean;
   emergencyShelter: boolean;
+  /** Numer kontaktowy; `null` czyści pole w dokumencie. */
+  phone: string | null;
 }>;
 
 /** Zapisuje zmienione pola punktu (tylko podane wchodzą do update). */
@@ -322,6 +327,8 @@ export type PointCreateFields = {
   fireSpot?: boolean;
   overnight?: boolean;
   emergencyShelter?: boolean;
+  /** Numer kontaktowy punktu (opcjonalny; walidacja po stronie callable). */
+  phone?: string;
 };
 
 /**
