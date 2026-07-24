@@ -29,6 +29,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -441,9 +442,11 @@ function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: strin
       <DropdownMenuContent align="end" className="min-w-44">
         {header && (
           <>
-            <DropdownMenuLabel className="max-w-64 text-xs font-normal whitespace-normal text-muted-foreground">
-              {header}
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="max-w-64 text-xs font-normal whitespace-normal text-muted-foreground">
+                {header}
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
           </>
         )}
