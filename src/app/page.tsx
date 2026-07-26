@@ -1079,7 +1079,6 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
               <TableHead className="w-24">Cel</TableHead>
               <TableHead className="w-40">Przyczyna</TableHead>
               <TableHead>Powód (tekst)</TableHead>
-              <TableHead className="w-12 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1090,6 +1089,47 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
         </Table>
       )}
     </Section>
+  );
+}
+
+// Podpisana grupa akcji — etykieta po lewej, przyciski po prawej. Wspólny wzorzec
+// dla „Treść" i „Zgłoszenie", żeby wizualnie było jasne że to DWIE różne decyzje.
+function ActionRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="mt-1.5 w-24 shrink-0 text-xs font-medium text-muted-foreground" title={hint}>
+        {label}
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+// Grupa ZGŁOSZENIE — decyzja o SAMYM zgłoszeniu (nie o treści). Zamyka report;
+// treści nie rusza. Zawsze widoczna, także gdy cel skasowany (żeby dało się domknąć).
+function ReportDecision({ r }: { r: ReportItem }) {
+  return (
+    <ActionRow label="Zgłoszenie" hint="Zamyka samo zgłoszenie — treść zostaje bez zmian">
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1 px-2"
+        title="Zgłoszenie było zasadne — zamknij i usuń z kolejki"
+        onClick={() => act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte (zasadne)")}
+      >
+        <Check className="h-3.5 w-3.5" />
+        Zasadne — zamknij
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2"
+        title="Zgłoszenie bez podstaw — odrzuć i usuń z kolejki"
+        onClick={() => act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)")}
+      >
+        Niezasadne — odrzuć
+      </Button>
+    </ActionRow>
   );
 }
 
@@ -1148,35 +1188,22 @@ function ReportRow({ r }: { r: ReportItem }) {
         <TableCell className="align-top text-sm text-muted-foreground">
           <p className="whitespace-pre-wrap break-words">{r.reason || "—"}</p>
         </TableCell>
-        <TableCell className="align-top text-right">
-          <KebabMenu
-            header="Zamyka tylko zgłoszenie — treścią i punktem zarządzasz po rozwinięciu wiersza."
-            actions={[
-              {
-                label: "Uznaj zgłoszenie i zamknij",
-                onClick: () =>
-                  act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte (zasadne)"),
-              },
-              {
-                label: "Odrzuć zgłoszenie jako niezasadne",
-                variant: "destructive",
-                onClick: () =>
-                  act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)"),
-              },
-            ]}
-          />
-        </TableCell>
       </TableRow>
       {open && (
         <TableRow>
-          <TableCell colSpan={5} className="bg-muted/30">
-            {target === undefined ? (
-              <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
-            ) : target === null ? (
-              <span className="text-xs text-muted-foreground">Nie znaleziono zgłoszonej treści (mogła zostać usunięta).</span>
-            ) : target ? (
-              <ReportTarget r={r} target={target} isComment={isComment} />
-            ) : null}
+          <TableCell colSpan={4} className="bg-muted/30">
+            <div className="flex flex-col gap-3 py-1">
+              {/* Grupa TREŚĆ — akcje na zgłoszonym opisie/komentarzu (tylko gdy cel istnieje) */}
+              {target === undefined ? (
+                <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
+              ) : target === null ? (
+                <span className="text-xs text-muted-foreground">Nie znaleziono zgłoszonej treści (mogła zostać usunięta).</span>
+              ) : (
+                <ReportTarget r={r} target={target} isComment={isComment} />
+              )}
+              {/* Grupa ZGŁOSZENIE — zawsze, by dało się zamknąć nawet bez celu */}
+              <ReportDecision r={r} />
+            </div>
           </TableCell>
         </TableRow>
       )}
@@ -1212,46 +1239,45 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
         ...(p && mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
       ];
   return (
-    <div className="py-1">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 text-sm">
-          {c && (
-            <>
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-medium">{c.authorName || "Użytkownik"}</span>
-                <StateBadge state={c.state} />
-              </div>
-              <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
-            </>
-          )}
-          {p && (
-            <>
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-medium">{p.name || p.pointId}</span>
-                <StateBadge state={p.state} />
-              </div>
-              <PointProps p={p} />
-              <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
-            </>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {c ? (
-            <PublishHideButtons
-              onPublish={() => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Opublikowano")}
-              onHide={() =>
-                confirmHide("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Ukryto")
-              }
-            />
-          ) : (
-            <PublishHideButtons
-              onPublish={() => act({ action: "approveDescription", pointId: r.pointId }, "Opublikowano")}
-              onHide={() => confirmHide("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Ukryto")}
-            />
-          )}
-          <KebabMenu actions={kebab} />
-        </div>
+    <div className="flex flex-col gap-2">
+      <div className="min-w-0 text-sm">
+        {c && (
+          <>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="font-medium">{c.authorName || "Użytkownik"}</span>
+              <StateBadge state={c.state} />
+            </div>
+            <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
+          </>
+        )}
+        {p && (
+          <>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="font-medium">{p.name || p.pointId}</span>
+              <StateBadge state={p.state} />
+            </div>
+            <PointProps p={p} />
+            <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
+          </>
+        )}
       </div>
+      {/* Grupa TREŚĆ — decyzja o zgłoszonym opisie/komentarzu (widoczność w apce) */}
+      <ActionRow label="Treść">
+        {c ? (
+          <PublishHideButtons
+            onPublish={() => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Opublikowano")}
+            onHide={() =>
+              confirmHide("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Ukryto")
+            }
+          />
+        ) : (
+          <PublishHideButtons
+            onPublish={() => act({ action: "approveDescription", pointId: r.pointId }, "Opublikowano")}
+            onHide={() => confirmHide("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Ukryto")}
+          />
+        )}
+        <KebabMenu actions={kebab} />
+      </ActionRow>
       <PointEditDialog point={editing && p ? p : null} onClose={() => setEditing(false)} />
     </div>
   );
