@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff, Pencil } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
@@ -541,7 +541,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
 // tylko ZMIENIONE pola (callable wymaga ≥1). Zmiana nazwy/opisu → serwer zapisuje
 // approved + contentHash (bez re-moderacji). Bez nowej zależności (Input/Select/
 // natywne checkboxy + textarea).
-function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () => void }) {
+function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onDone: () => void; onSaved?: () => void }) {
   const [name, setName] = useState(point.name ?? "");
   const [description, setDescription] = useState(point.description ?? "");
   const [type, setType] = useState(point.type ?? "");
@@ -585,6 +585,7 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
     try {
       await editPoint(point.pointId, fields);
       toast.success("Punkt zaktualizowany");
+      onSaved?.();
       onDone();
     } catch (e) {
       toast.error("Nie udało się: " + (e instanceof Error ? e.message : "błąd"));
@@ -668,13 +669,13 @@ function PointEditForm({ point, onDone }: { point: DescriptionItem; onDone: () =
 
 // Edycja punktu zawsze w modalu (decyzja UX 0721) — bez rozwijania wierszy
 // tabeli; Esc/backdrop/Anuluj zamykają bez zapisu.
-function PointEditDialog({ point, onClose }: { point: DescriptionItem | null; onClose: () => void }) {
+function PointEditDialog({ point, onClose, onSaved }: { point: DescriptionItem | null; onClose: () => void; onSaved?: () => void }) {
   return (
     <Dialog open={point !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
       {point && (
         <DialogContent>
           <DialogTitle>Edytuj punkt — {point.name || point.pointId}</DialogTitle>
-          <PointEditForm point={point} onDone={onClose} />
+          <PointEditForm point={point} onDone={onClose} onSaved={onSaved} />
         </DialogContent>
       )}
     </Dialog>
@@ -1079,7 +1080,7 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
               <TableHead className="w-24">Cel</TableHead>
               <TableHead className="w-40">Przyczyna</TableHead>
               <TableHead>Powód (tekst)</TableHead>
-              <TableHead className="w-12 text-right">Akcje</TableHead>
+              <TableHead className="w-96 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1093,31 +1094,39 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
   );
 }
 
+// Odrzucenie zgłoszenia jako niezasadne (treść zostaje bez zmian). Wydzielone,
+// bo używane i przy istniejącym celu, i gdy cel skasowany (report i tak da się domknąć).
+function dismissReport(r: ReportItem) {
+  act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)");
+}
+
 // Wiersz zgłoszenia z rozwijanym PODGLĄDEM zgłoszonej treści (resolve celu po id)
 // + akcjami NA CEL (zatwierdź/odrzuć), obok zamknięcia samego zgłoszenia.
 function ReportRow({ r }: { r: ReportItem }) {
+  // Wiersz startuje ZWINIĘTY — chevron rozwija sam PODGLĄD treści. Akcje są w linii
+  // wiersza (kolumna Akcje), więc nie wymagają rozwijania.
   const [open, setOpen] = useState(false);
+  // undefined = jeszcze nie pobrano (ładowanie), null = celu nie znaleziono, obiekt = cel.
   const [target, setTarget] = useState<CommentItem | DescriptionItem | null | undefined>(undefined);
-  const [loading, setLoading] = useState(false);
   const isComment = r.target === "comment";
   const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
 
-  async function toggle() {
-    const next = !open;
-    setOpen(next);
-    if (next && target === undefined) {
-      setLoading(true);
-      try {
-        const t = isComment && r.commentId
-          ? await fetchCommentById(r.pointId, r.commentId)
-          : await fetchDescriptionById(r.pointId);
-        setTarget(t);
-      } catch {
-        setTarget(null);
-      } finally {
-        setLoading(false);
-      }
-    }
+  // Eager-load celu w TLE (mimo że wiersz zwinięty) — akcje w wierszu potrzebują
+  // danych celu. setState w callbacku promisy — poza synchronicznym ciałem efektu.
+  useEffect(() => {
+    let alive = true;
+    const p = isComment && r.commentId
+      ? fetchCommentById(r.pointId, r.commentId)
+      : fetchDescriptionById(r.pointId);
+    p.then((t) => alive && setTarget(t)).catch(() => alive && setTarget(null));
+    return () => {
+      alive = false;
+    };
+  }, [isComment, r.commentId, r.pointId]);
+
+  // Cel jest już w stanie — chevron tylko pokazuje/chowa, bez ponownego fetcha.
+  function toggle() {
+    setOpen((o) => !o);
   }
 
   return (
@@ -1146,35 +1155,22 @@ function ReportRow({ r }: { r: ReportItem }) {
         <TableCell className="align-top text-sm text-muted-foreground">
           <p className="whitespace-pre-wrap break-words">{r.reason || "—"}</p>
         </TableCell>
-        <TableCell className="align-top text-right">
-          <KebabMenu
-            header="Zamyka tylko zgłoszenie — treścią i punktem zarządzasz po rozwinięciu wiersza."
-            actions={[
-              {
-                label: "Uznaj zgłoszenie i zamknij",
-                onClick: () =>
-                  act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte (zasadne)"),
-              },
-              {
-                label: "Odrzuć zgłoszenie jako niezasadne",
-                variant: "destructive",
-                onClick: () =>
-                  act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)"),
-              },
-            ]}
-          />
+        <TableCell className="align-top">
+          <ReportActions r={r} target={target} isComment={isComment} />
         </TableCell>
       </TableRow>
       {open && (
         <TableRow>
           <TableCell colSpan={5} className="bg-muted/30">
-            {loading ? (
-              <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
-            ) : target === null ? (
-              <span className="text-xs text-muted-foreground">Nie znaleziono zgłoszonej treści (mogła zostać usunięta).</span>
-            ) : target ? (
-              <ReportTarget r={r} target={target} isComment={isComment} />
-            ) : null}
+            <div className="py-1">
+              {target === undefined ? (
+                <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
+              ) : target === null ? (
+                <span className="text-sm text-muted-foreground">—</span>
+              ) : (
+                <ReportPreview target={target} isComment={isComment} />
+              )}
+            </div>
           </TableCell>
         </TableRow>
       )}
@@ -1182,13 +1178,21 @@ function ReportRow({ r }: { r: ReportItem }) {
   );
 }
 
-// Rozwinięty cel zgłoszenia = ten sam wzorzec akcji co wiersz kolejki:
-// [Opublikuj] [Ukryj] [⋯], a dla punktu/opisu w kebabie także „Edytuj punkt"
-// otwierające ten sam modal co w kolejce opisów.
-function ReportTarget({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem; isComment: boolean }) {
-  const c = isComment ? (target as CommentItem) : null;
-  const p = !isComment ? (target as DescriptionItem) : null;
+// Akcje zgłoszenia — renderowane W LINII wiersza (kolumna Akcje), nie w rozwinięciu.
+// Działają na doładowanym w tle `target`. Główne akcje widoczne, reszta pod kebabem,
+// zestaw zależny od typu celu. Każda akcja na treści AUTO-ZAMYKA zgłoszenie (actioned);
+// „Odrzuć zgłoszenie" (dismissed) działa zawsze, także zanim cel się doładuje.
+function ReportActions({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem | null | undefined; isComment: boolean }) {
   const [editing, setEditing] = useState(false);
+  const c = target && isComment ? (target as CommentItem) : null;
+  const p = target && !isComment ? (target as DescriptionItem) : null;
+  const hidden = target?.state === "rejected"; // ukryty w aplikacji
+
+  // Po skutecznej akcji na treści zamykamy też zgłoszenie — znika z kolejki.
+  const closeActioned = () =>
+    act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte");
+
+  // Kebab = akcje drugorzędne, zależne od typu celu (pusty, gdy cel się nie doładował).
   const kebab: KebabAction[] = c
     ? [
         {
@@ -1197,60 +1201,108 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
           onClick: () => actBlock(c.authorUid, c.authorName),
         },
       ]
-    : [
-        {
-          label: "Edytuj punkt",
-          onClick: () => setEditing(true),
-        },
-        {
-          label: "Usuń punkt",
-          variant: "destructive",
-          onClick: () => actDeletePoint(r.pointId, p?.name ?? ""),
-        },
-        ...(p && mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
-      ];
-  return (
-    <div className="py-1">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 text-sm">
-          {c && (
-            <>
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-medium">{c.authorName || "Użytkownik"}</span>
-                <StateBadge state={c.state} />
-              </div>
-              <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
-            </>
-          )}
-          {p && (
-            <>
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-medium">{p.name || p.pointId}</span>
-                <StateBadge state={p.state} />
-              </div>
-              <PointProps p={p} />
-              <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
-            </>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {c ? (
-            <PublishHideButtons
-              onPublish={() => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Opublikowano")}
-              onHide={() =>
-                confirmHide("komentarz") && act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Ukryto")
+    : p
+      ? [
+          {
+            label: "Usuń punkt",
+            variant: "destructive",
+            onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned),
+          },
+          hidden
+            ? {
+                label: "Opublikuj opis",
+                onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Opis opublikowany", closeActioned),
               }
-            />
-          ) : (
-            <PublishHideButtons
-              onPublish={() => act({ action: "approveDescription", pointId: r.pointId }, "Opublikowano")}
-              onHide={() => confirmHide("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Ukryto")}
-            />
-          )}
-          <KebabMenu actions={kebab} />
-        </div>
-      </div>
-      <PointEditDialog point={editing && p ? p : null} onClose={() => setEditing(false)} />
+            : {
+                label: "Ukryj opis",
+                onClick: () => {
+                  if (confirmHide("opis")) act({ action: "rejectDescription", pointId: r.pointId }, "Opis ukryty", closeActioned);
+                },
+              },
+          ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
+        ]
+      : [];
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {c ? (
+        hidden ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
+            onClick={() =>
+              act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz opublikowany", closeActioned)
+            }
+          >
+            <Check className="h-3.5 w-3.5" />
+            Opublikuj komentarz
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
+            onClick={() => {
+              if (window.confirm("Usunąć komentarz? Zniknie z aplikacji (można przywrócić przez „Opublikuj komentarz”)."))
+                act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz usunięty", closeActioned);
+            }}
+          >
+            <EyeOff className="h-3.5 w-3.5" />
+            Usuń komentarz
+          </Button>
+        )
+      ) : p ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
+          onClick={() => setEditing(true)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          Edytuj punkt
+        </Button>
+      ) : null}
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2"
+        title="Zgłoszenie bez podstaw — treść zostaje bez zmian"
+        onClick={() => dismissReport(r)}
+      >
+        Odrzuć zgłoszenie
+      </Button>
+      <KebabMenu actions={kebab} />
+      {p && <PointEditDialog point={editing ? p : null} onClose={() => setEditing(false)} onSaved={closeActioned} />}
+    </div>
+  );
+}
+
+// Podgląd zgłoszonej treści (rozwijany chevronem) — sam tekst, bez akcji.
+function ReportPreview({ target, isComment }: { target: CommentItem | DescriptionItem; isComment: boolean }) {
+  const c = isComment ? (target as CommentItem) : null;
+  const p = !isComment ? (target as DescriptionItem) : null;
+  return (
+    <div className="min-w-0 text-sm">
+      {c && (
+        <>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="font-medium">{c.authorName || "Użytkownik"}</span>
+            <StateBadge state={c.state} />
+          </div>
+          <p className="whitespace-pre-wrap break-words">{c.text || "—"}</p>
+        </>
+      )}
+      {p && (
+        <>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="font-medium">{p.name || p.pointId}</span>
+            <StateBadge state={p.state} />
+          </div>
+          <PointProps p={p} />
+          <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "—"}</p>
+        </>
+      )}
     </div>
   );
 }
