@@ -1096,28 +1096,30 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
 // Wiersz zgłoszenia z rozwijanym PODGLĄDEM zgłoszonej treści (resolve celu po id)
 // + akcjami NA CEL (zatwierdź/odrzuć), obok zamknięcia samego zgłoszenia.
 function ReportRow({ r }: { r: ReportItem }) {
-  const [open, setOpen] = useState(false);
+  // Domyślnie ROZWINIĘTE — cel zgłoszenia i akcje na nim (Opublikuj/Ukryj/Edytuj/Usuń)
+  // widoczne od razu, bez klikania chevronu. Chevron zostaje, by móc zwinąć wiersz.
+  const [open, setOpen] = useState(true);
+  // undefined = jeszcze nie pobrano (ładowanie), null = celu nie znaleziono, obiekt = cel.
   const [target, setTarget] = useState<CommentItem | DescriptionItem | null | undefined>(undefined);
-  const [loading, setLoading] = useState(false);
   const isComment = r.target === "comment";
   const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
 
-  async function toggle() {
-    const next = !open;
-    setOpen(next);
-    if (next && target === undefined) {
-      setLoading(true);
-      try {
-        const t = isComment && r.commentId
-          ? await fetchCommentById(r.pointId, r.commentId)
-          : await fetchDescriptionById(r.pointId);
-        setTarget(t);
-      } catch {
-        setTarget(null);
-      } finally {
-        setLoading(false);
-      }
-    }
+  // Eager-load celu na wejściu (wiersz startuje rozwinięty). setState w callbacku
+  // promisy — poza synchronicznym ciałem efektu.
+  useEffect(() => {
+    let alive = true;
+    const p = isComment && r.commentId
+      ? fetchCommentById(r.pointId, r.commentId)
+      : fetchDescriptionById(r.pointId);
+    p.then((t) => alive && setTarget(t)).catch(() => alive && setTarget(null));
+    return () => {
+      alive = false;
+    };
+  }, [isComment, r.commentId, r.pointId]);
+
+  // Cel jest już w stanie — chevron tylko pokazuje/chowa, bez ponownego fetcha.
+  function toggle() {
+    setOpen((o) => !o);
   }
 
   return (
@@ -1168,7 +1170,7 @@ function ReportRow({ r }: { r: ReportItem }) {
       {open && (
         <TableRow>
           <TableCell colSpan={5} className="bg-muted/30">
-            {loading ? (
+            {target === undefined ? (
               <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
             ) : target === null ? (
               <span className="text-xs text-muted-foreground">Nie znaleziono zgłoszonej treści (mogła zostać usunięta).</span>
