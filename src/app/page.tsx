@@ -1162,10 +1162,10 @@ function ReportRow({ r }: { r: ReportItem }) {
               {target === undefined ? (
                 <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
               ) : target === null ? (
-                // Cel skasowany — nie ma na czym działać, ale zgłoszenie trzeba domknąć.
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">Zgłoszona treść już nie istnieje (usunięta).</span>
-                  <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => dismissReport(r)}>
+                // Brak treści (np. punkt bez opisu) — myślnik, bez alarmu o usunięciu.
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">—</span>
+                  <Button size="sm" variant="outline" className="h-7 shrink-0 px-2" onClick={() => dismissReport(r)}>
                     Odrzuć zgłoszenie
                   </Button>
                 </div>
@@ -1224,7 +1224,7 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
       ];
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex items-start justify-between gap-3">
       <div className="min-w-0 text-sm">
         {c && (
           <>
@@ -1232,7 +1232,7 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
               <span className="font-medium">{c.authorName || "Użytkownik"}</span>
               <StateBadge state={c.state} />
             </div>
-            <p className="whitespace-pre-wrap break-words">{c.text || "[brak treści]"}</p>
+            <p className="whitespace-pre-wrap break-words">{c.text || "—"}</p>
           </>
         )}
         {p && (
@@ -1242,12 +1242,12 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
               <StateBadge state={p.state} />
             </div>
             <PointProps p={p} />
-            <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "[brak opisu]"}</p>
+            <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "—"}</p>
           </>
         )}
       </div>
-      {/* Główne akcje na wierzchu; reszta pod kebabem. Każda zmiana treści zamyka zgłoszenie. */}
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* Akcje przypięte do prawej; główne widoczne, reszta pod kebabem. Każda zmiana treści zamyka zgłoszenie. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {c ? (
           hidden ? (
             <Button
