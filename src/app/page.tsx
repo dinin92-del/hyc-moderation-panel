@@ -1080,6 +1080,7 @@ function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: 
               <TableHead className="w-24">Cel</TableHead>
               <TableHead className="w-40">Przyczyna</TableHead>
               <TableHead>Powód (tekst)</TableHead>
+              <TableHead className="w-96 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1102,16 +1103,16 @@ function dismissReport(r: ReportItem) {
 // Wiersz zgłoszenia z rozwijanym PODGLĄDEM zgłoszonej treści (resolve celu po id)
 // + akcjami NA CEL (zatwierdź/odrzuć), obok zamknięcia samego zgłoszenia.
 function ReportRow({ r }: { r: ReportItem }) {
-  // Domyślnie ROZWINIĘTE — cel zgłoszenia i akcje na nim (Opublikuj/Ukryj/Edytuj/Usuń)
-  // widoczne od razu, bez klikania chevronu. Chevron zostaje, by móc zwinąć wiersz.
-  const [open, setOpen] = useState(true);
+  // Wiersz startuje ZWINIĘTY — chevron rozwija sam PODGLĄD treści. Akcje są w linii
+  // wiersza (kolumna Akcje), więc nie wymagają rozwijania.
+  const [open, setOpen] = useState(false);
   // undefined = jeszcze nie pobrano (ładowanie), null = celu nie znaleziono, obiekt = cel.
   const [target, setTarget] = useState<CommentItem | DescriptionItem | null | undefined>(undefined);
   const isComment = r.target === "comment";
   const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
 
-  // Eager-load celu na wejściu (wiersz startuje rozwinięty). setState w callbacku
-  // promisy — poza synchronicznym ciałem efektu.
+  // Eager-load celu w TLE (mimo że wiersz zwinięty) — akcje w wierszu potrzebują
+  // danych celu. setState w callbacku promisy — poza synchronicznym ciałem efektu.
   useEffect(() => {
     let alive = true;
     const p = isComment && r.commentId
@@ -1154,23 +1155,20 @@ function ReportRow({ r }: { r: ReportItem }) {
         <TableCell className="align-top text-sm text-muted-foreground">
           <p className="whitespace-pre-wrap break-words">{r.reason || "—"}</p>
         </TableCell>
+        <TableCell className="align-top">
+          <ReportActions r={r} target={target} isComment={isComment} />
+        </TableCell>
       </TableRow>
       {open && (
         <TableRow>
-          <TableCell colSpan={4} className="bg-muted/30">
+          <TableCell colSpan={5} className="bg-muted/30">
             <div className="py-1">
               {target === undefined ? (
                 <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
               ) : target === null ? (
-                // Brak treści (np. punkt bez opisu) — myślnik, bez alarmu o usunięciu.
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-sm text-muted-foreground">—</span>
-                  <Button size="sm" variant="outline" className="h-7 shrink-0 px-2" onClick={() => dismissReport(r)}>
-                    Odrzuć zgłoszenie
-                  </Button>
-                </div>
+                <span className="text-sm text-muted-foreground">—</span>
               ) : (
-                <ReportTarget r={r} target={target} isComment={isComment} />
+                <ReportPreview target={target} isComment={isComment} />
               )}
             </div>
           </TableCell>
@@ -1180,21 +1178,21 @@ function ReportRow({ r }: { r: ReportItem }) {
   );
 }
 
-// Rozwinięty cel zgłoszenia. Model: zgłoszenie = wskaźnik na treść do przeglądu.
-// Akcja na treści (usuń/ukryj/edytuj/opublikuj) AUTO-ZAMYKA zgłoszenie (actioned);
-// „Odrzuć zgłoszenie" zamyka bez zmiany treści (dismissed). Główne akcje widoczne,
-// reszta pod kebabem — zestaw zależny od typu celu (komentarz vs opis/punkt).
-function ReportTarget({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem; isComment: boolean }) {
-  const c = isComment ? (target as CommentItem) : null;
-  const p = !isComment ? (target as DescriptionItem) : null;
+// Akcje zgłoszenia — renderowane W LINII wiersza (kolumna Akcje), nie w rozwinięciu.
+// Działają na doładowanym w tle `target`. Główne akcje widoczne, reszta pod kebabem,
+// zestaw zależny od typu celu. Każda akcja na treści AUTO-ZAMYKA zgłoszenie (actioned);
+// „Odrzuć zgłoszenie" (dismissed) działa zawsze, także zanim cel się doładuje.
+function ReportActions({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem | null | undefined; isComment: boolean }) {
   const [editing, setEditing] = useState(false);
-  const hidden = target.state === "rejected"; // ukryty w aplikacji
+  const c = target && isComment ? (target as CommentItem) : null;
+  const p = target && !isComment ? (target as DescriptionItem) : null;
+  const hidden = target?.state === "rejected"; // ukryty w aplikacji
 
   // Po skutecznej akcji na treści zamykamy też zgłoszenie — znika z kolejki.
   const closeActioned = () =>
     act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte");
 
-  // Kebab = akcje drugorzędne, zależne od typu celu.
+  // Kebab = akcje drugorzędne, zależne od typu celu (pusty, gdy cel się nie doładował).
   const kebab: KebabAction[] = c
     ? [
         {
@@ -1203,95 +1201,102 @@ function ReportTarget({ r, target, isComment }: { r: ReportItem; target: Comment
           onClick: () => actBlock(c.authorUid, c.authorName),
         },
       ]
-    : [
-        {
-          label: "Usuń punkt",
-          variant: "destructive",
-          onClick: () => actDeletePoint(r.pointId, p?.name ?? "", closeActioned),
-        },
-        hidden
-          ? {
-              label: "Opublikuj opis",
-              onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Opis opublikowany", closeActioned),
-            }
-          : {
-              label: "Ukryj opis",
-              onClick: () => {
-                if (confirmHide("opis")) act({ action: "rejectDescription", pointId: r.pointId }, "Opis ukryty", closeActioned);
+    : p
+      ? [
+          {
+            label: "Usuń punkt",
+            variant: "destructive",
+            onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned),
+          },
+          hidden
+            ? {
+                label: "Opublikuj opis",
+                onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Opis opublikowany", closeActioned),
+              }
+            : {
+                label: "Ukryj opis",
+                onClick: () => {
+                  if (confirmHide("opis")) act({ action: "rejectDescription", pointId: r.pointId }, "Opis ukryty", closeActioned);
+                },
               },
-            },
-        ...(p && mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
-      ];
+          ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
+        ]
+      : [];
 
   return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0 text-sm">
-        {c && (
-          <>
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-medium">{c.authorName || "Użytkownik"}</span>
-              <StateBadge state={c.state} />
-            </div>
-            <p className="whitespace-pre-wrap break-words">{c.text || "—"}</p>
-          </>
-        )}
-        {p && (
-          <>
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-medium">{p.name || p.pointId}</span>
-              <StateBadge state={p.state} />
-            </div>
-            <PointProps p={p} />
-            <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "—"}</p>
-          </>
-        )}
-      </div>
-      {/* Akcje przypięte do prawej; główne widoczne, reszta pod kebabem. Każda zmiana treści zamyka zgłoszenie. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-        {c ? (
-          hidden ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
-              onClick={() =>
-                act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz opublikowany", closeActioned)
-              }
-            >
-              <Check className="h-3.5 w-3.5" />
-              Opublikuj komentarz
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:border-red-600 hover:bg-red-600/10 hover:text-red-800 dark:text-red-500"
-              onClick={() => {
-                if (window.confirm("Usunąć komentarz? Zniknie z aplikacji (można przywrócić przez „Opublikuj komentarz”)."))
-                  act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz usunięty", closeActioned);
-              }}
-            >
-              <EyeOff className="h-3.5 w-3.5" />
-              Usuń komentarz
-            </Button>
-          )
-        ) : (
-          <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setEditing(true)}>
-            Edytuj punkt
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {c ? (
+        hidden ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
+            onClick={() =>
+              act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz opublikowany", closeActioned)
+            }
+          >
+            <Check className="h-3.5 w-3.5" />
+            Opublikuj komentarz
           </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 px-2"
-          title="Zgłoszenie bez podstaw — treść zostaje bez zmian"
-          onClick={() => dismissReport(r)}
-        >
-          Odrzuć zgłoszenie
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:border-red-600 hover:bg-red-600/10 hover:text-red-800 dark:text-red-500"
+            onClick={() => {
+              if (window.confirm("Usunąć komentarz? Zniknie z aplikacji (można przywrócić przez „Opublikuj komentarz”)."))
+                act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz usunięty", closeActioned);
+            }}
+          >
+            <EyeOff className="h-3.5 w-3.5" />
+            Usuń komentarz
+          </Button>
+        )
+      ) : p ? (
+        <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setEditing(true)}>
+          Edytuj punkt
         </Button>
-        <KebabMenu actions={kebab} />
-      </div>
-      <PointEditDialog point={editing && p ? p : null} onClose={() => setEditing(false)} onSaved={closeActioned} />
+      ) : null}
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2"
+        title="Zgłoszenie bez podstaw — treść zostaje bez zmian"
+        onClick={() => dismissReport(r)}
+      >
+        Odrzuć zgłoszenie
+      </Button>
+      <KebabMenu actions={kebab} />
+      {p && <PointEditDialog point={editing ? p : null} onClose={() => setEditing(false)} onSaved={closeActioned} />}
+    </div>
+  );
+}
+
+// Podgląd zgłoszonej treści (rozwijany chevronem) — sam tekst, bez akcji.
+function ReportPreview({ target, isComment }: { target: CommentItem | DescriptionItem; isComment: boolean }) {
+  const c = isComment ? (target as CommentItem) : null;
+  const p = !isComment ? (target as DescriptionItem) : null;
+  return (
+    <div className="min-w-0 text-sm">
+      {c && (
+        <>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="font-medium">{c.authorName || "Użytkownik"}</span>
+            <StateBadge state={c.state} />
+          </div>
+          <p className="whitespace-pre-wrap break-words">{c.text || "—"}</p>
+        </>
+      )}
+      {p && (
+        <>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="font-medium">{p.name || p.pointId}</span>
+            <StateBadge state={p.state} />
+          </div>
+          <PointProps p={p} />
+          <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "—"}</p>
+        </>
+      )}
     </div>
   );
 }
