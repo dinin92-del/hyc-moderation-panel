@@ -1555,12 +1555,15 @@ function ContentTab() {
               {clampedPage * PAGE_SIZE + 1}–{Math.min(visible.length, clampedPage * PAGE_SIZE + PAGE_SIZE)} z {visible.length}
             </span>
             <div className="flex items-center gap-2">
+              {/* Kroki liczone od clampedPage, NIE od surowego `page` — po
+                  skasowaniu treści lista się kurczy i `page` zostaje poza
+                  zakresem; krok od `page` wyglądałby wtedy jak zacięty przycisk. */}
               <Button
                 variant="outline"
                 size="sm"
                 className="h-7 px-2"
                 disabled={clampedPage === 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                onClick={() => setPage(Math.max(0, clampedPage - 1))}
               >
                 Poprzednia
               </Button>
@@ -1570,7 +1573,7 @@ function ContentTab() {
                 size="sm"
                 className="h-7 px-2"
                 disabled={clampedPage >= totalPages - 1}
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                onClick={() => setPage(Math.min(totalPages - 1, clampedPage + 1))}
               >
                 Następna
               </Button>
