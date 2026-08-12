@@ -67,7 +67,44 @@ export type DescriptionItem = {
   phone: string | null;
   /** `moderation-panel` dla punktów wpisanych ręcznie z panelu (podpis „Zespół Hyc!"). */
   createdVia: string | null;
+  /**
+   * Autor OPISU — osobny od autora dokumentu. Opis dopisany do istniejącego
+   * punktu (ścieżka update) NIE zmienia `authorUid`, więc bez tych pól panel
+   * przypisywał cudzy opis twórcy punktu. Null = dokument sprzed #615 —
+   * atrybucję rozstrzyga [descriptionContributor].
+   */
+  descriptionAuthorUid: string | null;
+  descriptionAuthorName: string | null;
+  descriptionAddedAt: number | null;
 };
+
+/**
+ * Autor opisu do pokazania w panelu — LUSTRO `PointDoc.descriptionContributorName`
+ * (lib/core/models/point_doc.dart, #615). Rozjazd tych dwóch kopii znaczy, że
+ * panel przypisuje opis komu innemu niż aplikacja pokazuje userowi.
+ *
+ * Nowe dokumenty niosą autora wprost. Dla dokumentów legacy autor jest znany
+ * TYLKO, gdy opis wszedł razem z utworzeniem dokumentu (`createdAt` ≈
+ * `descriptionAddedAt`, jeden zapis — tolerancja 2 min). Opis dopisany później
+ * przez kogoś innego → null: BRAK atrybucji zamiast fałszywego przypisania
+ * twórcy punktu. To nie jest ostrożność dla ozdoby — przy tym wierszu stoi
+ * „Zablokuj autora opisu".
+ */
+const LEGACY_SAME_WRITE_MS = 2 * 60 * 1000;
+export function descriptionContributor(
+  p: DescriptionItem,
+): { name: string; uid: string | null } | null {
+  const explicit = p.descriptionAuthorName?.trim();
+  if (explicit) return { name: explicit, uid: p.descriptionAuthorUid };
+  if (
+    p.createdAt !== null &&
+    p.descriptionAddedAt !== null &&
+    Math.abs(p.descriptionAddedAt - p.createdAt) <= LEGACY_SAME_WRITE_MS
+  ) {
+    return p.authorName.trim() ? { name: p.authorName, uid: p.authorUid } : null;
+  }
+  return null;
+}
 
 export type ReportItem = {
   id: string;
@@ -142,6 +179,9 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     emergencyShelter: !!d.emergencyShelter,
     phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
     createdVia: d.createdVia ?? null,
+    descriptionAuthorUid: d.descriptionAuthorUid ?? null,
+    descriptionAuthorName: d.descriptionAuthorName ?? null,
+    descriptionAddedAt: millis(d.descriptionAddedAt),
   };
 }
 

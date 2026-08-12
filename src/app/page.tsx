@@ -49,6 +49,7 @@ import {
   fetchAllReports,
   fetchPointsByIds,
   fetchUserNames,
+  descriptionContributor,
   fetchCommentById,
   fetchDescriptionById,
   fetchLogFor,
@@ -1693,12 +1694,20 @@ function AuthorCell({ name, uid, blocked }: { name: string; uid: string; blocked
 }
 
 // Akcja blokady/odblokowania autora do kebaba — pusta lista, gdy nie znamy uid
-// (stare dokumenty) albo autorem jest moderator (wpis panelu).
-function blockActions(uid: string, name: string, blocked: Set<string>, after?: () => void): KebabAction[] {
+// (stare dokumenty) albo autorem jest moderator (wpis panelu). `label` doprecyzowuje
+// KOGO blokujemy, gdy w wierszu jest więcej niż jeden autor (punkt vs opis).
+function blockActions(
+  uid: string,
+  name: string,
+  blocked: Set<string>,
+  after?: () => void,
+  label?: string,
+): KebabAction[] {
   if (!uid) return [];
+  const kogo = label ?? "Zablokuj autora";
   return blocked.has(uid)
-    ? [{ label: "Odblokuj autora", onClick: () => actUnblock(uid, after) }]
-    : [{ label: "Zablokuj autora", variant: "destructive", onClick: () => actBlock(uid, name, after) }];
+    ? [{ label: label ? label.replace("Zablokuj", "Odblokuj") : "Odblokuj autora", onClick: () => actUnblock(uid, after) }]
+    : [{ label: kogo, variant: "destructive", onClick: () => actBlock(uid, name, after) }];
 }
 
 function ContentRow({
@@ -1763,7 +1772,27 @@ function ContentRow({
     case "description": {
       const p = item.p;
       const isPanelPoint = p.createdVia === "moderation-panel";
-      author = <AuthorCell name={nameOf(p.authorName, p.authorUid)} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />;
+      // Autor DOKUMENTU (twórca punktu) i autor OPISU to dwie różne osoby, gdy
+      // opis dopisano do cudzego punktu — #615 rozdzielił je w apce, panel musi
+      // to lustrzyć. Pokazujemy oba tylko wtedy, gdy się różnią.
+      const opisAutor = p.description ? descriptionContributor(p) : null;
+      const opisInny = !!opisAutor && opisAutor.uid !== p.authorUid;
+      author = (
+        <div className="flex flex-col gap-1">
+          <AuthorCell name={nameOf(p.authorName, p.authorUid)} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />
+          {opisInny && (
+            <span className="text-xs text-muted-foreground" title={opisAutor.uid ?? undefined}>
+              opis: {opisAutor.name}
+            </span>
+          )}
+          {/* Opis bez atrybucji: dokument legacy, w którym opis dopisano
+              PÓŹNIEJ niż powstał punkt — tożsamości autora nie da się już
+              odzyskać. Milczymy zamiast przypisać go twórcy punktu. */}
+          {p.description && !opisAutor && (
+            <span className="text-xs italic text-muted-foreground">opis: autor nieznany</span>
+          )}
+        </div>
+      );
       content = (
         <div className="flex flex-col gap-0.5">
           <span className="font-semibold break-words" title={p.pointId}>{titleOf(p.pointId)}</span>
@@ -1783,7 +1812,14 @@ function ContentRow({
       kebab = [
         { label: "Edytuj punkt", onClick: () => onEdit({ p }) },
         ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
-        ...(isPanelPoint ? [] : blockActions(p.authorUid, p.authorName, blocked)),
+        ...(isPanelPoint ? [] : blockActions(p.authorUid, p.authorName, blocked, undefined,
+          opisInny ? "Zablokuj autora punktu" : undefined)),
+        // ⛔ Osobna pozycja, gdy opis jest CUDZY: bez niej „Zablokuj autora"
+        // przy wierszu z obraźliwym opisem trafiałoby w twórcę punktu, czyli
+        // w niewinną osobę. Blokujemy tego, kto napisał treść.
+        ...(opisInny && opisAutor.uid
+          ? blockActions(opisAutor.uid, opisAutor.name, blocked, undefined, "Zablokuj autora opisu")
+          : []),
         { label: "Usuń punkt", variant: "destructive", onClick: () => actDeletePoint(p.pointId, p.name, reload) },
       ];
       historyPointId = p.pointId;
@@ -1877,8 +1913,21 @@ function ContentRow({
                 { label: "Edytuj punkt", onClick: () => onEdit({ p, onSaved: closeActioned }) },
                 ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
                 // Parytet z wierszem opisu: autora da się zablokować także z
-                // poziomu zgłoszenia (chyba że to wpis panelu).
-                ...(p.createdVia === "moderation-panel" ? [] : blockActions(p.authorUid, p.authorName, blocked)),
+                // poziomu zgłoszenia (chyba że to wpis panelu). ⛔ Zgłoszenie
+                // o celu `description` dotyczy OPISU, więc blokada musi trafić
+                // w jego autora — przy cudzym opisie twórca punktu jest tu
+                // osobą postronną.
+                ...(p.createdVia === "moderation-panel"
+                  ? []
+                  : (() => {
+                      const a = r.target === "description" && p.description
+                        ? descriptionContributor(p)
+                        : null;
+                      const inny = !!a && a.uid !== p.authorUid;
+                      return inny && a.uid
+                        ? blockActions(a.uid, a.name, blocked, undefined, "Zablokuj autora opisu")
+                        : blockActions(p.authorUid, p.authorName, blocked);
+                    })()),
                 { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned) },
               ]
             : []),
