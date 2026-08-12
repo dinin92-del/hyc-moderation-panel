@@ -317,15 +317,17 @@ export async function fetchAllReports(take: number = BROWSE_LIMIT): Promise<Repo
  * złożonego) — sort po stronie klienta; wpisów per treść jest garść.
  */
 export async function fetchLogFor(pointId: string, commentId: string | null): Promise<LogItem[]> {
-  const clauses = [where("pointId", "==", pointId)];
+  // ⛔ Odsiew po `targetType` musi być W ZAPYTANIU, nie po stronie klienta.
+  // `limit` obowiązuje PRZED filtrem klienckim, więc punkt z żywą dyskusją
+  // (dużo wpisów komentarzy) wypełniał okno logami komentarzy, a po odfiltrowaniu
+  // zostawała garść wpisów opisu — historia wyglądała na kompletną i nie była.
+  const clauses = [
+    where("pointId", "==", pointId),
+    where("targetType", "==", commentId ? "comment" : "description"),
+  ];
   if (commentId) clauses.push(where("commentId", "==", commentId));
   const snap = await getDocs(query(collection(db, "moderationLog"), ...clauses, limit(50)));
-  const out = snap.docs
-    .map((d) => mapLog(d.data(), d.id))
-    // Bez commentId pytamy o OPIS punktu — wpisy komentarzy tego punktu
-    // odpadają. Podwójny predykat (brak commentId ORAZ nie-komentarzowy
-    // targetType), żeby pusty string w commentId nie przemycił cudzego wpisu.
-    .filter((l) => (commentId ? true : !l.commentId && l.targetType !== "comment"));
+  const out = snap.docs.map((d) => mapLog(d.data(), d.id));
   out.sort(byNewest);
   return out;
 }

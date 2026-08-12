@@ -1462,9 +1462,19 @@ function ContentTab() {
 
   if (!content || !comments || !reports) return <Empty text="Ładowanie…" />;
 
-  // Dociągnięci rodzice NAJPIERW, żeby prawdziwy rekord z listy ich nadpisał.
+  // Rodzic dociągnięty wcześniej może w międzyczasie wejść do listy (np. po
+  // „Załaduj więcej") — wtedy odpada, bo rekord z listy jest świeższy. Odsiew
+  // przy budowie mapy, nie czyszczeniem stanu: `setState` w efekcie kaskaduje
+  // render (react-hooks/set-state-in-effect), a tu wystarczy czysty filtr.
+  const contentIds = new Set(
+    [...content.newPoints, ...content.described].map((p) => p.pointId),
+  );
   const pointById = new Map(
-    [...parents, ...content.described, ...content.newPoints].map((p) => [p.pointId, p]),
+    [
+      ...parents.filter((p) => !contentIds.has(p.pointId)),
+      ...content.described,
+      ...content.newPoints,
+    ].map((p) => [p.pointId, p]),
   );
 
   const items: ContentItem[] = [
