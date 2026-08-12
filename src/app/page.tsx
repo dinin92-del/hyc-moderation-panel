@@ -1863,14 +1863,20 @@ function ContentRow({
     case "report": {
       const r = item.r;
       const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
-      // Zgłaszający — nazwa konta jak wszędzie indziej; sam uid nic nie mówi.
+      // ⛔ W wierszu zgłoszenia kolumna „Autor" pokazuje ZGŁASZAJĄCEGO, a akcje
+      // w kebabie działają na autorze ZGŁOSZONEJ TREŚCI — to dwie różne osoby.
+      // Bez tego podpisu moderator czyta nazwisko z kolumny i klika „Zablokuj
+      // autora" przekonany, że blokuje właśnie ją.
       // Blokada zgłaszającego świadomie NIEDOSTĘPNA (zgłaszanie to nie treść).
       author = r.reporterUid
-        ? <AuthorCell
-            name={nameOf("", r.reporterUid)}
-            uid={r.reporterUid}
-            blocked={blocked.has(r.reporterUid)}
-          />
+        ? <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">zgłosił</span>
+            <AuthorCell
+              name={nameOf("", r.reporterUid)}
+              uid={r.reporterUid}
+              blocked={blocked.has(r.reporterUid)}
+            />
+          </div>
         : <span className="text-muted-foreground">—</span>;
       content = (
         <div className="flex flex-col gap-0.5">
@@ -1903,7 +1909,8 @@ function ContentRow({
                         confirmHide("komentarz") &&
                         act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz ukryty", closeActioned),
                     },
-                ...blockActions(c.authorUid, c.authorName, blocked),
+                // Etykieta mówi KOGO, bo kolumna „Autor" pokazuje tu zgłaszającego.
+                ...blockActions(c.authorUid, c.authorName, blocked, undefined, "Zablokuj autora komentarza"),
               ]
             : []),
           ...(p
@@ -1926,7 +1933,7 @@ function ContentRow({
                       const inny = !!a && a.uid !== p.authorUid;
                       return inny && a.uid
                         ? blockActions(a.uid, a.name, blocked, undefined, "Zablokuj autora opisu")
-                        : blockActions(p.authorUid, p.authorName, blocked);
+                        : blockActions(p.authorUid, p.authorName, blocked, undefined, "Zablokuj autora punktu");
                     })()),
                 { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned) },
               ]
