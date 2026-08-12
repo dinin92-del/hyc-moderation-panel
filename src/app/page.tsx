@@ -45,8 +45,9 @@ import {
   type PointCreateFields,
   type PointEditFields,
   fetchAllComments,
-  fetchAllPoints,
+  fetchContentPoints,
   fetchAllReports,
+  fetchPointsByIds,
   fetchCommentById,
   fetchDescriptionById,
   fetchLogFor,
@@ -1410,9 +1411,16 @@ const FILTER_LABEL: Record<ContentFilter, string> = {
 const PAGE_SIZE = 50;
 
 function ContentTab() {
-  const [points, setPoints] = useState<DescriptionItem[] | null>(null);
+  const [content, setContent] = useState<{
+    newPoints: DescriptionItem[];
+    described: DescriptionItem[];
+    truncated: boolean;
+  } | null>(null);
   const [comments, setComments] = useState<CommentItem[] | null>(null);
   const [reports, setReports] = useState<ReportItem[] | null>(null);
+  // Rodzice komentarzy/zgłoszeń spoza pobranej strony punktów — TYLKO do nazwy
+  // w tytule wiersza, nigdy jako osobna pozycja listy.
+  const [parents, setParents] = useState<DescriptionItem[]>([]);
   const [blocked, setBlocked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<ContentFilter>("all");
   const [search, setSearch] = useState("");
@@ -1425,7 +1433,7 @@ function ContentTab() {
   const [page, setPage] = useState(0);
 
   const load = useCallback((take: number) => {
-    fetchAllPoints(take).then(setPoints).catch(() => toast.error("Błąd punktów i opisów."));
+    fetchContentPoints(take).then(setContent).catch(() => toast.error("Błąd punktów i opisów."));
     fetchAllComments(take).then(setComments).catch(() => toast.error("Błąd komentarzy."));
     fetchAllReports(take).then(setReports).catch(() => toast.error("Błąd zgłoszeń."));
   }, []);
@@ -1434,17 +1442,35 @@ function ContentTab() {
     (items) => setBlocked(new Set(items.map((b) => b.uid))),
     () => toast.error("Błąd listy zablokowanych — status „zablokowany” może być nieaktualny."),
   ), []);
-  if (!points || !comments || !reports) return <Empty text="Ładowanie…" />;
+  // Dociąg rodziców, których nie ma w pobranej stronie punktów — inaczej wiersz
+  // komentarza/zgłoszenia pokazuje gołe id zamiast nazwy widocznej w aplikacji.
+  useEffect(() => {
+    if (!content || !comments || !reports) return;
+    const have = new Set([...content.newPoints, ...content.described].map((p) => p.pointId));
+    const missing = [...new Set([
+      ...comments.map((c) => c.pointId),
+      ...reports.map((r) => r.pointId),
+    ])].filter((id) => id && !have.has(id));
+    if (missing.length === 0) return;
+    let alive = true;
+    // Limit strażniczy: przy dużej kolejce nie robimy setek odczytów naraz.
+    fetchPointsByIds(missing.slice(0, 200))
+      .then((ps) => alive && setParents(ps))
+      .catch(() => {/* tytuł spadnie na id — nie warto krzyczeć */});
+    return () => { alive = false; };
+  }, [content, comments, reports]);
 
-  // Nowy punkt = dokument UGC (apka albo panel); opis = nakładka z treścią na
-  // punkt kuratorowany. Nakładki bez opisu (sam telefon/atrybuty) pomijamy jak dotąd.
-  const isNewPoint = (p: DescriptionItem) => p.pointId.startsWith("UGC:");
-  const pointById = new Map(points.map((p) => [p.pointId, p]));
+  if (!content || !comments || !reports) return <Empty text="Ładowanie…" />;
+
+  // Dociągnięci rodzice NAJPIERW, żeby prawdziwy rekord z listy ich nadpisał.
+  const pointById = new Map(
+    [...parents, ...content.described, ...content.newPoints].map((p) => [p.pointId, p]),
+  );
 
   const items: ContentItem[] = [
-    ...points.filter(isNewPoint).map((p): ContentItem => (
+    ...content.newPoints.map((p): ContentItem => (
       { kind: "point", key: `point/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
-    ...points.filter((p) => !isNewPoint(p) && p.description.length > 0).map((p): ContentItem => (
+    ...content.described.map((p): ContentItem => (
       { kind: "description", key: `desc/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
     ...comments.map((c): ContentItem => (
       { kind: "comment", key: `comment/${c.pointId}/${c.commentId}`, createdAt: c.createdAt, isTest: c.isTest, c })),
@@ -1477,7 +1503,7 @@ function ContentTab() {
     report: items.filter((i) => i.kind === "report").length,
   };
   const truncated =
-    points.length >= fetchTake || comments.length >= fetchTake || reports.length >= fetchTake;
+    content.truncated || comments.length >= fetchTake || reports.length >= fetchTake;
   const reload = () => load(fetchTake);
 
   const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));

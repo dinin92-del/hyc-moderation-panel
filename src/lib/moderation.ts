@@ -6,6 +6,7 @@ import {
   getDocs,
   limit,
   onSnapshot,
+  orderBy,
   query,
   where,
   type DocumentData,
@@ -244,15 +245,61 @@ export async function fetchAllComments(take: number = BROWSE_LIMIT): Promise<Com
 }
 
 /**
- * Wszystkie dokumenty `points` (każdy stan), BEZ filtra „ma opis" — rozdział na
- * „nowy punkt" (id `UGC:*`, w tym ręczne z panelu) vs „opis do istniejącego
- * punktu" (nakładka na kuratorowany cid) robi widok, bo potrzebuje OBU grup:
- * ręczny punkt bez opisu też musi być edytowalny i usuwalny.
+ * Punkty i opisy do przeglądu — DWA CELOWANE zapytania zamiast jednego „daj
+ * wszystko z `points`".
+ *
+ * ⛔ Czemu nie jedno zapytanie: `points` trzyma nie tylko treść od userów, ale i
+ * SETKI nakładek kuratorowanych (sam telefon albo atrybuty, bez opisu). Ślepe
+ * `limit(N)` na całej kolekcji zjadały te nakładki, a prawdziwa treść wypadała
+ * za limit — najpierw wszystkie `UGC:*` (bo bez `orderBy` Firestore sortuje po
+ * ID, a `'O' < 'U'`), a po dołożeniu `orderBy(createdAt)` wypadały starsze
+ * opisy. Widok meldował wtedy „Nowe punkty (0)" / „Opisy (0)" i wyglądał na
+ * pusty przy pełnej bazie.
+ *
+ * Dlatego pytamy o dwie rozłączne grupy po polach, które MAJĄ tylko one:
+ *   • nowe punkty — `source == "ugc"` (punkt z apki albo z panelu),
+ *   • opisy — `descriptionAddedAt` istnieje (pole zapisywane przy dodaniu
+ *     opisu; nakładka bez opisu go nie ma, więc `orderBy` ją pomija).
+ * Obie grupy mogą się przeciąć (punkt UGC z opisem) — deduplikuje [fetchContentPoints].
  */
-export async function fetchAllPoints(take: number = BROWSE_LIMIT): Promise<DescriptionItem[]> {
-  const snap = await getDocs(query(collection(db, "points"), limit(take)));
-  const out = snap.docs.map((d) => mapDescription(d.data(), d.id));
-  out.sort(byNewest);
+export async function fetchContentPoints(
+  take: number = BROWSE_LIMIT,
+): Promise<{ newPoints: DescriptionItem[]; described: DescriptionItem[]; truncated: boolean }> {
+  const [ugcSnap, descSnap] = await Promise.all([
+    // Sam filtr równościowy — bez `orderBy`, więc bez indeksu złożonego.
+    getDocs(query(collection(db, "points"), where("source", "==", "ugc"), limit(take))),
+    getDocs(query(collection(db, "points"), orderBy("descriptionAddedAt", "desc"), limit(take))),
+  ]);
+  const newPoints = ugcSnap.docs.map((d) => mapDescription(d.data(), d.id));
+  const ugcIds = new Set(newPoints.map((p) => p.pointId));
+  const described = descSnap.docs
+    .map((d) => mapDescription(d.data(), d.id))
+    // Punkt UGC z opisem jest już w `newPoints` — w widoku ma być JEDNYM wierszem.
+    .filter((p) => !ugcIds.has(p.pointId) && p.description.length > 0);
+  newPoints.sort(byNewest);
+  described.sort(byNewest);
+  return {
+    newPoints,
+    described,
+    truncated: ugcSnap.size >= take || descSnap.size >= take,
+  };
+}
+
+/**
+ * Punkty po ID — do WYŚWIETLENIA NAZWY przy komentarzu/zgłoszeniu, którego
+ * rodzic nie zmieścił się w [fetchAllPoints]. Bez tego wiersz pokazuje gołe
+ * `UGC:...` zamiast nazwy, którą user widzi w aplikacji. Brakujące dokumenty
+ * (punkt usunięty) po prostu nie wracają.
+ */
+export async function fetchPointsByIds(ids: string[]): Promise<DescriptionItem[]> {
+  const snaps = await Promise.all(
+    ids.map((id) => getDoc(doc(db, "points", id)).catch(() => null)),
+  );
+  const out: DescriptionItem[] = [];
+  for (const s of snaps) {
+    const data = s?.data();
+    if (data) out.push(mapDescription(data, s!.id));
+  }
   return out;
 }
 
