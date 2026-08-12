@@ -286,6 +286,25 @@ export async function fetchContentPoints(
 }
 
 /**
+ * Nazwy kont po uid (`users/{uid}.displayName`, read: isMod).
+ *
+ * Zgłoszenie niesie tylko `reporterUid`, więc bez tego kolumna „Autor" pokazuje
+ * surowy identyfikator, który nic nie mówi. Brakujący dokument albo puste pole
+ * zostaje pominięte — wiersz spadnie wtedy na „Użytkownik" jak w aplikacji.
+ */
+export async function fetchUserNames(uids: string[]): Promise<Map<string, string>> {
+  const snaps = await Promise.all(
+    uids.map((uid) => getDoc(doc(db, "users", uid)).catch(() => null)),
+  );
+  const out = new Map<string, string>();
+  for (const s of snaps) {
+    const name = s?.data()?.displayName;
+    if (s && typeof name === "string" && name.trim() !== "") out.set(s.id, name);
+  }
+  return out;
+}
+
+/**
  * Punkty po ID — do WYŚWIETLENIA NAZWY przy komentarzu/zgłoszeniu, którego
  * rodzic nie zmieścił się w [fetchAllPoints]. Bez tego wiersz pokazuje gołe
  * `UGC:...` zamiast nazwy, którą user widzi w aplikacji. Brakujące dokumenty

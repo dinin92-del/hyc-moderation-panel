@@ -48,6 +48,7 @@ import {
   fetchContentPoints,
   fetchAllReports,
   fetchPointsByIds,
+  fetchUserNames,
   fetchCommentById,
   fetchDescriptionById,
   fetchLogFor,
@@ -1421,6 +1422,13 @@ function ContentTab() {
   // Rodzice komentarzy/zgłoszeń spoza pobranej strony punktów — TYLKO do nazwy
   // w tytule wiersza, nigdy jako osobna pozycja listy.
   const [parents, setParents] = useState<DescriptionItem[]>([]);
+  // uid → displayName; zgłoszenie niesie sam uid zgłaszającego, komentarz/opis
+  // starego usera bywa bez `authorName`.
+  const [userNames, setUserNames] = useState<Map<string, string>>(new Map());
+  // Id, o które PYTALIŚMY przy dociągu rodziców. Brak w `parents` po odpytaniu
+  // znaczy „punktu nie ma w bazie" (usunięty) — i tylko wtedy wolno tak napisać;
+  // bez tego zbioru nie odróżnisz usuniętego od jeszcze-nie-pobranego.
+  const [probedIds, setProbedIds] = useState<Set<string>>(new Set());
   const [blocked, setBlocked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<ContentFilter>("all");
   const [search, setSearch] = useState("");
@@ -1454,9 +1462,33 @@ function ContentTab() {
     if (missing.length === 0) return;
     let alive = true;
     // Limit strażniczy: przy dużej kolejce nie robimy setek odczytów naraz.
-    fetchPointsByIds(missing.slice(0, 200))
-      .then((ps) => alive && setParents(ps))
+    const asked = missing.slice(0, 200);
+    fetchPointsByIds(asked)
+      .then((ps) => {
+        if (!alive) return;
+        setParents(ps);
+        setProbedIds(new Set(asked));
+      })
       .catch(() => {/* tytuł spadnie na id — nie warto krzyczeć */});
+    return () => { alive = false; };
+  }, [content, comments, reports]);
+
+  // Nazwy kont — dla zgłaszających (zgłoszenie ma sam uid) i dla treści bez
+  // zapisanego `authorName`. Osobny efekt, bo lista uid zmienia się inaczej
+  // niż lista punktów-rodziców.
+  useEffect(() => {
+    if (!content || !comments || !reports) return;
+    const uids = new Set<string>();
+    for (const r of reports) if (r.reporterUid) uids.add(r.reporterUid);
+    for (const c of comments) if (c.authorUid && !c.authorName) uids.add(c.authorUid);
+    for (const p of [...content.newPoints, ...content.described]) {
+      if (p.authorUid && !p.authorName) uids.add(p.authorUid);
+    }
+    if (uids.size === 0) return;
+    let alive = true;
+    fetchUserNames([...uids].slice(0, 200))
+      .then((m) => alive && setUserNames(m))
+      .catch(() => {/* zostaje uid — nie warto krzyczeć */});
     return () => { alive = false; };
   }, [content, comments, reports]);
 
@@ -1577,6 +1609,8 @@ function ContentTab() {
                   key={it.key}
                   item={it}
                   pointById={pointById}
+                  probedIds={probedIds}
+                  userNames={userNames}
                   blocked={blocked}
                   onEdit={setEditing}
                   reload={reload}
@@ -1642,16 +1676,18 @@ function ContentTab() {
 
 // Autor treści + status blokady. Blokada per WIERSZ (nie tylko lista
 // „Zablokowani"), bo decyzję podejmuje się patrząc na treść.
+// Nazwę podaje wywołujący (przez `nameOf`, z fallbackiem „Użytkownik" jak w
+// aplikacji). uid trafia tu WYŁĄCZNIE do tooltipa — kolumna ma pokazywać
+// człowieka, a nie identyfikator bazy; surowy uid był nieczytelny i mylił.
 function AuthorCell({ name, uid, blocked }: { name: string; uid: string; blocked: boolean }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="break-words">{name || "Użytkownik"}</span>
+    <div className="flex flex-col gap-1" title={uid || undefined}>
+      <span className="break-words">{name}</span>
       {blocked && (
         <span className="inline-flex w-fit items-center rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
           zablokowany
         </span>
       )}
-      {!name && uid && <span className="font-mono text-[10px] text-muted-foreground break-all">{uid}</span>}
     </div>
   );
 }
@@ -1668,12 +1704,16 @@ function blockActions(uid: string, name: string, blocked: Set<string>, after?: (
 function ContentRow({
   item,
   pointById,
+  probedIds,
+  userNames,
   blocked,
   onEdit,
   reload,
 }: {
   item: ContentItem;
   pointById: Map<string, DescriptionItem>;
+  probedIds: Set<string>;
+  userNames: Map<string, string>;
   blocked: Set<string>;
   onEdit: (e: EditingPoint) => void;
   reload: () => void;
@@ -1705,20 +1745,28 @@ function ContentRow({
   // Lustro apki (`shelter.dart`: `name ?? type.labelPl`) — brak nazwy pokazuje
   // etykietę TYPU, nie gołe id. Surowe id zostaje jako OSTATECZNY fallback,
   // gdy nawet typu nie znamy (np. cel usunięty).
-  const titleOf = (pointId: string, fallback?: string) => {
+  // Nazwa punktu → etykieta TYPU, gdy nazwy brak (lustro apki: shelter.dart
+  // `name ?? type.labelPl`) → „Punkt usunięty", gdy odpytaliśmy bazę i punktu
+  // nie ma. Gołe id nie trafia do kolumny — dla człowieka nic nie znaczy;
+  // zostaje w tooltipie [PointTitle].
+  const titleOf = (pointId: string): string => {
     const pd = pointById.get(pointId);
-    return pd?.name || (pd && SHELTER_TYPE_LABEL[pd.type]) || fallback || pointId;
+    if (pd) return pd.name || SHELTER_TYPE_LABEL[pd.type] || "Punkt bez nazwy";
+    return probedIds.has(pointId) ? "Punkt usunięty" : "Ładowanie…";
   };
+  // Nazwa konta: zapisana przy treści → dociągnięta z `users` → jak w apce.
+  const nameOf = (authorName: string, uid: string) =>
+    authorName || userNames.get(uid) || "Użytkownik";
 
   switch (item.kind) {
     case "point":
     case "description": {
       const p = item.p;
       const isPanelPoint = p.createdVia === "moderation-panel";
-      author = <AuthorCell name={p.authorName} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />;
+      author = <AuthorCell name={nameOf(p.authorName, p.authorUid)} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />;
       content = (
         <div className="flex flex-col gap-0.5">
-          <span className="font-semibold break-words">{titleOf(p.pointId)}</span>
+          <span className="font-semibold break-words" title={p.pointId}>{titleOf(p.pointId)}</span>
           <PointProps p={p} />
           {p.description ? (
             <p className="line-clamp-3 whitespace-pre-wrap break-words">{p.description}</p>
@@ -1744,10 +1792,10 @@ function ContentRow({
     case "comment": {
       const c = item.c;
       const parent = pointById.get(c.pointId);
-      author = <AuthorCell name={c.authorName} uid={c.authorUid} blocked={blocked.has(c.authorUid)} />;
+      author = <AuthorCell name={nameOf(c.authorName, c.authorUid)} uid={c.authorUid} blocked={blocked.has(c.authorUid)} />;
       content = (
         <div className="flex flex-col gap-0.5">
-          <span className="font-semibold break-words">{titleOf(c.pointId)}</span>
+          <span className="font-semibold break-words" title={c.pointId}>{titleOf(c.pointId)}</span>
           {c.text
             ? <p className="line-clamp-3 whitespace-pre-wrap break-words">{c.text}</p>
             : <span className="text-xs italic text-muted-foreground">[brak treści]</span>}
@@ -1779,12 +1827,18 @@ function ContentRow({
     case "report": {
       const r = item.r;
       const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
-      author = (
-        <span className="font-mono text-[10px] text-muted-foreground break-all">{r.reporterUid || "—"}</span>
-      );
+      // Zgłaszający — nazwa konta jak wszędzie indziej; sam uid nic nie mówi.
+      // Blokada zgłaszającego świadomie NIEDOSTĘPNA (zgłaszanie to nie treść).
+      author = r.reporterUid
+        ? <AuthorCell
+            name={nameOf("", r.reporterUid)}
+            uid={r.reporterUid}
+            blocked={blocked.has(r.reporterUid)}
+          />
+        : <span className="text-muted-foreground">—</span>;
       content = (
         <div className="flex flex-col gap-0.5">
-          <span className="font-semibold break-words">
+          <span className="font-semibold break-words" title={r.pointId}>
             {titleOf(r.pointId)}
             <span className="ml-2 font-normal text-xs text-muted-foreground">
               {TARGET_LABEL[r.target] ?? r.target} · {reason}
