@@ -1407,6 +1407,8 @@ const FILTER_LABEL: Record<ContentFilter, string> = {
   report: "Zgłoszenia",
 };
 
+const PAGE_SIZE = 50;
+
 function ContentTab() {
   const [points, setPoints] = useState<DescriptionItem[] | null>(null);
   const [comments, setComments] = useState<CommentItem[] | null>(null);
@@ -1416,18 +1418,22 @@ function ContentTab() {
   const [search, setSearch] = useState("");
   const [hideTest, setHideTest] = useState(false);
   const [editing, setEditing] = useState<EditingPoint | null>(null);
+  // Ile pobrać PER KOLEKCJA z serwera (rośnie „Załaduj więcej z serwera") vs
+  // która strona po 50 pokazujemy z tego, co już mamy w pamięci (Poprzednia/
+  // Następna) — dwa OSOBNE wymiary paginacji, nie mylić.
+  const [fetchTake, setFetchTake] = useState(BROWSE_LIMIT);
+  const [page, setPage] = useState(0);
 
-  const load = useCallback(() => {
-    fetchAllPoints().then(setPoints).catch(() => toast.error("Błąd punktów i opisów."));
-    fetchAllComments().then(setComments).catch(() => toast.error("Błąd komentarzy."));
-    fetchAllReports().then(setReports).catch(() => toast.error("Błąd zgłoszeń."));
+  const load = useCallback((take: number) => {
+    fetchAllPoints(take).then(setPoints).catch(() => toast.error("Błąd punktów i opisów."));
+    fetchAllComments(take).then(setComments).catch(() => toast.error("Błąd komentarzy."));
+    fetchAllReports(take).then(setReports).catch(() => toast.error("Błąd zgłoszeń."));
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(fetchTake); }, [load, fetchTake]);
   useEffect(() => watchBlockedUsers(
     (items) => setBlocked(new Set(items.map((b) => b.uid))),
     () => toast.error("Błąd listy zablokowanych — status „zablokowany” może być nieaktualny."),
   ), []);
-
   if (!points || !comments || !reports) return <Empty text="Ładowanie…" />;
 
   // Nowy punkt = dokument UGC (apka albo panel); opis = nakładka z treścią na
@@ -1471,14 +1477,21 @@ function ContentTab() {
     report: items.filter((i) => i.kind === "report").length,
   };
   const truncated =
-    points.length >= BROWSE_LIMIT || comments.length >= BROWSE_LIMIT || reports.length >= BROWSE_LIMIT;
+    points.length >= fetchTake || comments.length >= fetchTake || reports.length >= fetchTake;
+  const reload = () => load(fetchTake);
+
+  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageItems = visible.slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Każda zmiana zawężenia wraca na 1. stronę — inaczej można wylądować
+            na stronie, której po filtrze już nie ma. */}
         <FilterChips<ContentFilter>
           value={filter}
-          onChange={setFilter}
+          onChange={(v) => { setFilter(v); setPage(0); }}
           options={FILTER_ORDER.map((v) => ({
             value: v,
             label: `${FILTER_LABEL[v]} (${counts[v]})`,
@@ -1490,17 +1503,17 @@ function ContentTab() {
               type="checkbox"
               className="h-3.5 w-3.5 accent-foreground"
               checked={hideTest}
-              onChange={(e) => setHideTest(e.target.checked)}
+              onChange={(e) => { setHideTest(e.target.checked); setPage(0); }}
             />
             Ukryj testowe
           </label>
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             placeholder="Szukaj: punkt, autor, treść…"
             className="h-8 w-64"
           />
-          <Button variant="outline" size="sm" className="h-8 gap-1 px-2" onClick={load} title="Odśwież listę">
+          <Button variant="outline" size="sm" className="h-8 gap-1 px-2" onClick={reload} title="Odśwież listę">
             <RotateCw className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -1523,22 +1536,58 @@ function ContentTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visible.map((it) => (
+              {pageItems.map((it) => (
                 <ContentRow
                   key={it.key}
                   item={it}
                   pointById={pointById}
                   blocked={blocked}
                   onEdit={setEditing}
-                  reload={load}
+                  reload={reload}
                 />
               ))}
             </TableBody>
           </Table>
         )}
+        {visible.length > 0 && (
+          <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
+            <span>
+              {clampedPage * PAGE_SIZE + 1}–{Math.min(visible.length, clampedPage * PAGE_SIZE + PAGE_SIZE)} z {visible.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                disabled={clampedPage === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Poprzednia
+              </Button>
+              <span>{clampedPage + 1} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                disabled={clampedPage >= totalPages - 1}
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              >
+                Następna
+              </Button>
+            </div>
+          </div>
+        )}
         {truncated && (
-          <div className="border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
-            ⚠ Któraś z list sięgnęła limitu {BROWSE_LIMIT} — całość może być dłuższa. Zawęź wyszukiwaniem.
+          <div className="flex items-center justify-between gap-3 border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
+            <span>⚠ Pobrano pierwsze {fetchTake} z każdej listy (punkty/opisy, komentarze, zgłoszenia) — może być więcej na serwerze.</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 border-amber-400 bg-transparent px-2 text-amber-800 hover:bg-amber-100"
+              onClick={() => setFetchTake((t) => t + BROWSE_LIMIT)}
+            >
+              Załaduj więcej z serwera
+            </Button>
           </div>
         )}
       </Section>
@@ -1546,7 +1595,7 @@ function ContentTab() {
       <PointEditDialog
         point={editing?.p ?? null}
         onClose={() => setEditing(null)}
-        onSaved={() => { editing?.onSaved?.(); load(); }}
+        onSaved={() => { editing?.onSaved?.(); reload(); }}
       />
     </div>
   );
@@ -1614,8 +1663,13 @@ function ContentRow({
   let historyPointId = "";
   let historyCommentId: string | null = null;
 
-  const titleOf = (pointId: string, fallback?: string) =>
-    pointById.get(pointId)?.name || fallback || pointId;
+  // Lustro apki (`shelter.dart`: `name ?? type.labelPl`) — brak nazwy pokazuje
+  // etykietę TYPU, nie gołe id. Surowe id zostaje jako OSTATECZNY fallback,
+  // gdy nawet typu nie znamy (np. cel usunięty).
+  const titleOf = (pointId: string, fallback?: string) => {
+    const pd = pointById.get(pointId);
+    return pd?.name || (pd && SHELTER_TYPE_LABEL[pd.type]) || fallback || pointId;
+  };
 
   switch (item.kind) {
     case "point":
@@ -1625,7 +1679,7 @@ function ContentRow({
       author = <AuthorCell name={p.authorName} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />;
       content = (
         <div className="flex flex-col gap-0.5">
-          <span className="font-semibold break-words">{p.name || p.pointId}</span>
+          <span className="font-semibold break-words">{titleOf(p.pointId)}</span>
           <PointProps p={p} />
           {p.description ? (
             <p className="line-clamp-3 whitespace-pre-wrap break-words">{p.description}</p>
@@ -1635,18 +1689,13 @@ function ContentRow({
         </div>
       );
       state = <StateBadge state={p.state} />;
+      // Publikuj/Ukryj opis USUNIĘTE z tego widoku (decyzja usera 0812) —
+      // korekta treści idzie przez „Edytuj punkt" zamiast osobnego stanu
+      // widoczności. Kolejka (needs_review) zostaje z własnym Publikuj/Ukryj —
+      // to inny przepływ (moderacja pre-publikacji), nietknięty.
       kebab = [
         { label: "Edytuj punkt", onClick: () => onEdit({ p }) },
         ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
-        ...(p.description && p.state !== "approved"
-          ? [{ label: "Opublikuj opis", onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano", reload) }]
-          : []),
-        ...(p.description && p.state !== "rejected"
-          ? [{
-              label: "Ukryj opis",
-              onClick: () => confirmHide("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Ukryto", reload),
-            }]
-          : []),
         ...(isPanelPoint ? [] : blockActions(p.authorUid, p.authorName, blocked)),
         { label: "Usuń punkt", variant: "destructive", onClick: () => actDeletePoint(p.pointId, p.name, reload) },
       ];
@@ -1730,13 +1779,9 @@ function ContentRow({
             : []),
           ...(p
             ? [
+                // Opublikuj/Ukryj opis usunięte tu też — edycja punktu zamyka
+                // zgłoszenie przez onSaved, więc alternatywna droga zostaje.
                 { label: "Edytuj punkt", onClick: () => onEdit({ p, onSaved: closeActioned }) },
-                hidden
-                  ? { label: "Opublikuj opis", onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Opis opublikowany", closeActioned) }
-                  : {
-                      label: "Ukryj opis",
-                      onClick: () => confirmHide("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Opis ukryty", closeActioned),
-                    },
                 ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
                 // Parytet z wierszem opisu: autora da się zablokować także z
                 // poziomu zgłoszenia (chyba że to wpis panelu).
@@ -1746,7 +1791,13 @@ function ContentRow({
             : []),
           {
             label: "Odrzuć zgłoszenie",
-            onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)", reload),
+            // Zamknięcia (dismissed) nie da się cofnąć z panelu (brak akcji
+            // „otwórz ponownie") — potwierdzenie na modalu.
+            onClick: () => {
+              if (window.confirm("Odrzucić zgłoszenie jako niezasadne? Treść zostaje bez zmian, zgłoszenia nie da się potem ponownie otworzyć z panelu.")) {
+                act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)", reload);
+              }
+            },
           },
         ];
       } else {

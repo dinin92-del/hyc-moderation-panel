@@ -235,9 +235,9 @@ export function watchReportsQueue(cb: (items: ReportItem[]) => void, onErr: (e: 
   );
 }
 
-/** Wszystkie komentarze (każdy stan). */
-export async function fetchAllComments(): Promise<CommentItem[]> {
-  const snap = await getDocs(query(collectionGroup(db, "comments"), limit(BROWSE_LIMIT)));
+/** Wszystkie komentarze (każdy stan). `take` = ile pobrać (paginacja „Załaduj więcej"). */
+export async function fetchAllComments(take: number = BROWSE_LIMIT): Promise<CommentItem[]> {
+  const snap = await getDocs(query(collectionGroup(db, "comments"), limit(take)));
   const out = snap.docs.map((d) => mapComment(d.data(), d.id, d.ref.parent.parent?.id ?? ""));
   out.sort(byNewest);
   return out;
@@ -249,16 +249,16 @@ export async function fetchAllComments(): Promise<CommentItem[]> {
  * punktu" (nakładka na kuratorowany cid) robi widok, bo potrzebuje OBU grup:
  * ręczny punkt bez opisu też musi być edytowalny i usuwalny.
  */
-export async function fetchAllPoints(): Promise<DescriptionItem[]> {
-  const snap = await getDocs(query(collection(db, "points"), limit(BROWSE_LIMIT)));
+export async function fetchAllPoints(take: number = BROWSE_LIMIT): Promise<DescriptionItem[]> {
+  const snap = await getDocs(query(collection(db, "points"), limit(take)));
   const out = snap.docs.map((d) => mapDescription(d.data(), d.id));
   out.sort(byNewest);
   return out;
 }
 
 /** Wszystkie zgłoszenia (otwarte i zamknięte), najnowsze pierwsze. */
-export async function fetchAllReports(): Promise<ReportItem[]> {
-  const snap = await getDocs(query(collection(db, "reports"), limit(BROWSE_LIMIT)));
+export async function fetchAllReports(take: number = BROWSE_LIMIT): Promise<ReportItem[]> {
+  const snap = await getDocs(query(collection(db, "reports"), limit(take)));
   const out = snap.docs.map((d) => mapReport(d.data(), d.id));
   out.sort(byNewest);
   return out;
