@@ -6,7 +6,6 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   where,
   type DocumentData,
@@ -65,6 +64,8 @@ export type DescriptionItem = {
   emergencyShelter: boolean;
   /** Numer kontaktowy punktu — pole SERWEROWE, wpisywane tylko z panelu. */
   phone: string | null;
+  /** `moderation-panel` dla punktów wpisanych ręcznie z panelu (podpis „Zespół Hyc!"). */
+  createdVia: string | null;
 };
 
 export type ReportItem = {
@@ -78,6 +79,10 @@ export type ReportItem = {
   reporterUid: string;
   createdAt: number | null;
   isTest: boolean;
+  /** `open` | `closed` — zamknięte zgłoszenia widać tylko w „Wszystkie treści". */
+  status: string;
+  /** Rozwiązanie zamkniętego zgłoszenia: `actioned` | `dismissed` | null (otwarte). */
+  resolution: string | null;
 };
 
 export type LogItem = {
@@ -135,6 +140,7 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     overnight: !!d.overnight,
     emergencyShelter: !!d.emergencyShelter,
     phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
+    createdVia: d.createdVia ?? null,
   };
 }
 
@@ -150,6 +156,8 @@ function mapReport(d: DocumentData, id: string): ReportItem {
     reporterUid: d.reporterUid ?? "",
     createdAt: millis(d.createdAt),
     isTest: !!d._test || isSmokeId(d.pointId, d.commentId, d.reporterUid),
+    status: d.status ?? "open",
+    resolution: d.resolution ?? null,
   };
 }
 
@@ -227,12 +235,6 @@ export function watchReportsQueue(cb: (items: ReportItem[]) => void, onErr: (e: 
   );
 }
 
-/** Historia decyzji (moderationLog), najnowsze pierwsze — live. */
-export function watchHistory(cb: (items: LogItem[]) => void, onErr: (e: unknown) => void) {
-  const q = query(collection(db, "moderationLog"), orderBy("createdAt", "desc"), limit(BROWSE_LIMIT));
-  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapLog(d.data(), d.id))), onErr);
-}
-
 /** Wszystkie komentarze (każdy stan). */
 export async function fetchAllComments(): Promise<CommentItem[]> {
   const snap = await getDocs(query(collectionGroup(db, "comments"), limit(BROWSE_LIMIT)));
@@ -241,10 +243,42 @@ export async function fetchAllComments(): Promise<CommentItem[]> {
   return out;
 }
 
-/** Wszystkie opisy (każdy stan). */
-export async function fetchAllDescriptions(): Promise<DescriptionItem[]> {
+/**
+ * Wszystkie dokumenty `points` (każdy stan), BEZ filtra „ma opis" — rozdział na
+ * „nowy punkt" (id `UGC:*`, w tym ręczne z panelu) vs „opis do istniejącego
+ * punktu" (nakładka na kuratorowany cid) robi widok, bo potrzebuje OBU grup:
+ * ręczny punkt bez opisu też musi być edytowalny i usuwalny.
+ */
+export async function fetchAllPoints(): Promise<DescriptionItem[]> {
   const snap = await getDocs(query(collection(db, "points"), limit(BROWSE_LIMIT)));
-  const out = snap.docs.map((d) => mapDescription(d.data(), d.id)).filter((p) => p.description.length > 0);
+  const out = snap.docs.map((d) => mapDescription(d.data(), d.id));
+  out.sort(byNewest);
+  return out;
+}
+
+/** Wszystkie zgłoszenia (otwarte i zamknięte), najnowsze pierwsze. */
+export async function fetchAllReports(): Promise<ReportItem[]> {
+  const snap = await getDocs(query(collection(db, "reports"), limit(BROWSE_LIMIT)));
+  const out = snap.docs.map((d) => mapReport(d.data(), d.id));
+  out.sort(byNewest);
+  return out;
+}
+
+/**
+ * Historia decyzji JEDNEJ treści (moderationLog po pointId/commentId).
+ * Bez `orderBy` w zapytaniu (równość + sort po innym polu wymagałaby indeksu
+ * złożonego) — sort po stronie klienta; wpisów per treść jest garść.
+ */
+export async function fetchLogFor(pointId: string, commentId: string | null): Promise<LogItem[]> {
+  const clauses = [where("pointId", "==", pointId)];
+  if (commentId) clauses.push(where("commentId", "==", commentId));
+  const snap = await getDocs(query(collection(db, "moderationLog"), ...clauses, limit(50)));
+  const out = snap.docs
+    .map((d) => mapLog(d.data(), d.id))
+    // Bez commentId pytamy o OPIS punktu — wpisy komentarzy tego punktu
+    // odpadają. Podwójny predykat (brak commentId ORAZ nie-komentarzowy
+    // targetType), żeby pusty string w commentId nie przemycił cudzego wpisu.
+    .filter((l) => (commentId ? true : !l.commentId && l.targetType !== "comment"));
   out.sort(byNewest);
   return out;
 }
@@ -330,32 +364,6 @@ export type PointCreateFields = {
   /** Numer kontaktowy punktu (opcjonalny; walidacja po stronie callable). */
   phone?: string;
 };
-
-/**
- * Punkty dodane ręcznie z panelu (`createdVia == "moderation-panel"`) — live.
- * Osobny strumień, bo lista „Wszystkie treści" pokazuje tylko punkty Z OPISEM, a
- * ręczny punkt bez opisu jest legalny — bez tego widoku nie dałoby się go potem
- * ani poprawić, ani usunąć. Sort po dacie w kliencie (bez indeksu złożonego).
- */
-export function watchManualPoints(
-  cb: (items: DescriptionItem[]) => void,
-  onErr: (e: unknown) => void,
-) {
-  const q = query(
-    collection(db, "points"),
-    where("createdVia", "==", "moderation-panel"),
-    limit(BROWSE_LIMIT),
-  );
-  return onSnapshot(
-    q,
-    (snap) => {
-      const out = snap.docs.map((d) => mapDescription(d.data(), d.id));
-      out.sort(byNewest);
-      cb(out);
-    },
-    onErr,
-  );
-}
 
 /** Tworzy nowy punkt UGC. Zwraca nadane `UGC:<id>`. */
 export async function createPoint(fields: PointCreateFields): Promise<string> {

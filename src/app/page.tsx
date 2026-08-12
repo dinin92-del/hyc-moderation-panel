@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff, Pencil } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff, Pencil, Plus, RotateCw } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
@@ -45,15 +45,15 @@ import {
   type PointCreateFields,
   type PointEditFields,
   fetchAllComments,
-  fetchAllDescriptions,
+  fetchAllPoints,
+  fetchAllReports,
   fetchCommentById,
   fetchDescriptionById,
-  watchHistory,
+  fetchLogFor,
   watchCommentsQueue,
   watchDescriptionsQueue,
   watchReportsQueue,
   watchBlockedUsers,
-  watchManualPoints,
   QUEUE_LIMIT,
   BROWSE_LIMIT,
   type CommentItem,
@@ -191,6 +191,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
   }, []);
 
   const queueTotal = comments.length + descs.length + reports.length;
+  const [addOpen, setAddOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-muted/20">
@@ -210,13 +211,22 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
 
       <main className="mx-auto max-w-7xl px-6 py-6">
         <Tabs defaultValue="queue">
-          <TabsList>
-            <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
-            <TabsTrigger value="add">Dodaj punkt</TabsTrigger>
-            <TabsTrigger value="history">Historia decyzji</TabsTrigger>
-            <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
-            <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
-          </TabsList>
+          {/* „Dodaj punkt" to AKCJA, nie widok — przycisk przy tabach, nie tab. */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <TabsList>
+              <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
+              <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
+              <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
+            </TabsList>
+            <Button
+              size="sm"
+              className="gap-1 bg-green-600 text-white hover:bg-green-700"
+              onClick={() => setAddOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Dodaj punkt
+            </Button>
+          </div>
 
           <TabsContent value="queue" className="space-y-6 pt-4">
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
@@ -233,14 +243,6 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
             <QueueReports items={reports} error={reportsErr} hideTest={hideTest} />
           </TabsContent>
 
-          <TabsContent value="add" className="pt-4">
-            <AddPointTab />
-          </TabsContent>
-
-          <TabsContent value="history" className="pt-4">
-            <HistoryTab />
-          </TabsContent>
-
           <TabsContent value="content" className="pt-4">
             <ContentTab />
           </TabsContent>
@@ -250,6 +252,8 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
           </TabsContent>
         </Tabs>
       </main>
+
+      <AddPointDialog open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   );
 }
@@ -713,13 +717,15 @@ function parseLatLon(raw: string): { lat: number; lon: number } | null {
 }
 
 /**
- * Formularz ręcznego dodania punktu (nazwa/kategoria/współrzędne/opis/flagi).
- * Punkt idzie przez callable `onModeratorCreatePoint` i jest widoczny w apce od
- * razu (UGC, approved) — bez czekania na moderację i bez wydania nowej wersji.
- * Formularz po zapisie czyści treść, ale ZOSTAWIA kategorię i flagi: wpisywanie
+ * Formularz ręcznego dodania punktu (nazwa/kategoria/współrzędne/opis/flagi) —
+ * w modalu pod przyciskiem „Dodaj punkt" przy tabach. Punkt idzie przez callable
+ * `onModeratorCreatePoint` i jest widoczny w apce od razu (UGC, approved) — bez
+ * czekania na moderację i bez wydania nowej wersji. Formularz po zapisie czyści
+ * treść, ale ZOSTAWIA kategorię i flagi (modal zostaje otwarty): wpisywanie
  * serii punktów tego samego typu to główny scenariusz (import z listy adresów).
+ * Dodane punkty widać w „Wszystkie treści" jako „Nowy punkt".
  */
-function AddPointTab() {
+function AddPointForm() {
   const [name, setName] = useState("");
   const [type, setType] = useState("");
   const [lat, setLat] = useState("");
@@ -731,14 +737,6 @@ function AddPointTab() {
   const [emergencyShelter, setEmergencyShelter] = useState(false);
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
-  const [manual, setManual] = useState<DescriptionItem[]>([]);
-  const [manualErr, setManualErr] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  useEffect(() => watchManualPoints(
-    (items) => { setManualErr(null); setManual(items); },
-    () => setManualErr("Nie udało się wczytać listy dodanych punktów."),
-  ), []);
 
   // Wklejenie pary („49.412, 20.712" lub link z mapy) w pole szerokości rozbija
   // się na oba pola — przy przepisywaniu z listy to najczęstszy ruch.
@@ -802,16 +800,12 @@ function AddPointTab() {
   );
 
   return (
-    <div className="space-y-6">
-      <section className="max-w-3xl rounded-lg border bg-background p-4">
-        <header className="mb-3 space-y-1">
-          <h2 className="text-sm font-semibold">Nowy punkt</h2>
-          <p className="text-xs text-muted-foreground">
-            Punkt trafia do bazy jako wpis moderatora (podpis „Zespół Hyc!”) i jest widoczny
-            w aplikacji od razu — bez kolejki moderacji. Opis jest opcjonalny; bez niego apka
-            pokaże przy punkcie zaproszenie „Zostań pionierem”.
-          </p>
-        </header>
+    <div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Punkt trafia do bazy jako wpis moderatora (podpis „Zespół Hyc!”) i jest widoczny
+          w aplikacji od razu — bez kolejki moderacji. Opis jest opcjonalny; bez niego apka
+          pokaże przy punkcie zaproszenie „Zostań pionierem”.
+        </p>
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm">
@@ -909,82 +903,22 @@ function AddPointTab() {
             <span className="text-xs text-muted-foreground">* pola wymagane</span>
           </div>
         </div>
-      </section>
-
-      <Section title="Dodane ręcznie" count={manual.length}>
-        {manualErr ? (
-          <QueueError message={manualErr} />
-        ) : manual.length === 0 ? (
-          <Empty text="Nie dodano jeszcze żadnego punktu z panelu." />
-        ) : (
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-56">Punkt</TableHead>
-                <TableHead>Opis</TableHead>
-                <TableHead className="w-40">Współrzędne</TableHead>
-                <TableHead className="w-28">Data</TableHead>
-                <TableHead className="w-16 text-right">Akcje</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {manual.map((p) => (
-                <TableRow key={p.pointId}>
-                  <TableCell className="align-top text-sm font-medium">
-                    <span className="break-words">{p.name || p.pointId}</span>
-                    <PointProps p={p} />
-                  </TableCell>
-                  <TableCell className="align-top text-sm">
-                    {p.description ? (
-                      <p className="whitespace-pre-wrap break-words">{p.description}</p>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">bez opisu</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="align-top text-xs text-muted-foreground">
-                    {p.lat !== null && p.lon !== null && (
-                      <a
-                        className="inline-flex items-center gap-1 underline"
-                        href={mapLink(p.lat, p.lon)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {p.lat.toFixed(5)}, {p.lon.toFixed(5)}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </TableCell>
-                  <TableCell className="align-top font-mono text-xs text-muted-foreground">
-                    {fmtDate(p.createdAt)}
-                  </TableCell>
-                  <TableCell className="align-top text-right">
-                    <KebabMenu
-                      actions={[
-                        { label: "Edytuj punkt", onClick: () => setEditingId(p.pointId) },
-                        {
-                          label: "Usuń punkt",
-                          variant: "destructive",
-                          onClick: () => actDeletePoint(p.pointId, p.name),
-                        },
-                      ]}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-        {manual.length >= BROWSE_LIMIT && (
-          <div className="border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
-            ⚠ Pokazano pierwsze {BROWSE_LIMIT} punktów — lista jest dłuższa.
-          </div>
-        )}
-        <PointEditDialog
-          point={manual.find((p) => p.pointId === editingId) ?? null}
-          onClose={() => setEditingId(null)}
-        />
-      </Section>
     </div>
+  );
+}
+
+// Modal „Dodaj punkt" — zostaje otwarty po zapisie (seria punktów); Esc/backdrop
+// zamykają. Stan formularza żyje w AddPointForm, więc zamknięcie modala go zeruje.
+function AddPointDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      {open && (
+        <DialogContent>
+          <DialogTitle>Nowy punkt</DialogTitle>
+          <AddPointForm />
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }
 
@@ -1337,82 +1271,35 @@ function FilterChips<T extends string>({
   );
 }
 
-type HistoryFilter = "all" | "comment" | "description";
-const HISTORY_FILTER_LABELS: Record<HistoryFilter, string> = {
-  all: "Wszystkie",
-  comment: "Komentarze",
-  description: "Opisy",
-};
-
-function HistoryTab() {
-  const [rows, setRows] = useState<LogItem[] | null>(null);
-  const [historyErr, setHistoryErr] = useState<string | null>(null);
-  const [filter, setFilter] = useState<HistoryFilter>("all");
+// Historia decyzji JEDNEJ treści — rozwijana chevronem w „Wszystkie treści"
+// (zastąpiła globalną zakładkę „Historia decyzji": decyzję czyta się przy
+// treści, której dotyczy, nie w oderwanym logu).
+function HistoryPanel({ pointId, commentId }: { pointId: string; commentId: string | null }) {
+  // undefined = ładowanie, null = błąd, [] = brak wpisów.
+  const [rows, setRows] = useState<LogItem[] | null | undefined>(undefined);
   useEffect(() => {
-    return watchHistory(
-      (items) => { setHistoryErr(null); setRows(items); },
-      () => { setHistoryErr("Nie udało się wczytać historii — sprawdź połączenie i odśwież."); setRows([]); },
-    );
-  }, []);
+    let alive = true;
+    fetchLogFor(pointId, commentId)
+      .then((r) => alive && setRows(r))
+      .catch(() => alive && setRows(null));
+    return () => { alive = false; };
+  }, [pointId, commentId]);
 
-  if (rows === null) return <Empty text="Ładowanie…" />;
-
-  const visible = rows.filter((r) => filter === "all" || r.targetType === filter);
-
+  if (rows === undefined) return <span className="text-xs text-muted-foreground">Ładowanie historii…</span>;
+  if (rows === null) return <span className="text-xs text-destructive">Nie udało się wczytać historii decyzji.</span>;
+  if (rows.length === 0) return <span className="text-xs text-muted-foreground">Brak wpisów w historii decyzji.</span>;
   return (
-    <div className="space-y-3">
-      <FilterChips<HistoryFilter>
-        value={filter}
-        onChange={setFilter}
-        options={Object.entries(HISTORY_FILTER_LABELS).map(([v, label]) => ({ value: v as HistoryFilter, label }))}
-      />
-      <Section title="Historia decyzji" count={visible.length}>
-        {historyErr ? (
-          <QueueError message={historyErr} />
-        ) : visible.length === 0 ? (
-          <Empty text="Brak wpisów w historii decyzji." />
-        ) : (
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-28">Typ</TableHead>
-                <TableHead>Treść</TableHead>
-                <TableHead className="w-32">AI</TableHead>
-                <TableHead className="w-32">Człowiek</TableHead>
-                <TableHead className="w-24">Override</TableHead>
-                <TableHead className="w-36">Kiedy</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="align-top">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground">
-                        {r.targetType === "comment" ? "Komentarz" : r.targetType === "description" ? "Opis" : r.targetType}
-                      </span>
-                      {r.isTest && <TestBadge />}
-                    </div>
-                  </TableCell>
-                  <TableCell className="align-top text-sm">
-                    <p className="line-clamp-3">{r.text || "—"}</p>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    {r.ai ? <StateBadge state={r.ai.state} /> : <span className="text-xs text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="align-top">
-                    {r.human ? <StateBadge state={r.human.state} /> : <span className="text-xs text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="align-top">
-                    {r.overrodeAI ? <Badge variant="destructive">override</Badge> : <span className="text-xs text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(r.createdAt)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Section>
+    <div className="space-y-1.5">
+      <span className="text-xs font-semibold text-muted-foreground">Historia decyzji</span>
+      {rows.map((r) => (
+        <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-mono text-muted-foreground">{fmtDate(r.createdAt)}</span>
+          {r.ai && <span className="inline-flex items-center gap-1">AI: <StateBadge state={r.ai.state} /></span>}
+          {r.human && <span className="inline-flex items-center gap-1">Człowiek: <StateBadge state={r.human.state} /></span>}
+          {r.overrodeAI && <Badge variant="destructive">override</Badge>}
+          {r.text && <span className="line-clamp-1 max-w-96 text-muted-foreground">„{r.text}”</span>}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1465,131 +1352,458 @@ function BlockedTab() {
   );
 }
 
-type ContentFilter = "comments" | "descs";
+// ── Wszystkie treści (scalone: nowe punkty / opisy / komentarze / zgłoszenia) ──
+
+type ContentKind = "point" | "description" | "comment" | "report";
+type ContentFilter = "all" | ContentKind;
+
+const KIND_LABEL: Record<ContentKind, string> = {
+  point: "Nowy punkt",
+  description: "Opis",
+  comment: "Komentarz",
+  report: "Zgłoszenie",
+};
+
+// Kolor typu — rozróżnienie kategorii ma być widoczne w mieszanej liście
+// („Wszystko") bez czytania etykiety.
+const KIND_TONE: Record<ContentKind, string> = {
+  point: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  description: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300",
+  comment: "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300",
+  report: "border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
+};
+
+function KindBadge({ kind }: { kind: ContentKind }) {
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${KIND_TONE[kind]}`}>
+      {KIND_LABEL[kind]}
+    </span>
+  );
+}
+
+function ReportStatusBadge({ r }: { r: ReportItem }) {
+  if (r.status === "open") {
+    return <Badge className="border-transparent bg-amber-100 font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-300">Otwarte</Badge>;
+  }
+  const label = r.resolution === "dismissed" ? "Odrzucone" : "Załatwione";
+  return <Badge className="border-transparent bg-muted font-normal text-muted-foreground">{label}</Badge>;
+}
+
+type ContentItem =
+  | { kind: "point" | "description"; key: string; createdAt: number | null; isTest: boolean; p: DescriptionItem }
+  | { kind: "comment"; key: string; createdAt: number | null; isTest: boolean; c: CommentItem }
+  | { kind: "report"; key: string; createdAt: number | null; isTest: boolean; r: ReportItem };
+
+// Edycja z poziomu wiersza; onSaved pozwala wierszowi zgłoszenia domknąć
+// zgłoszenie po zapisie (parytet z kolejką).
+type EditingPoint = { p: DescriptionItem; onSaved?: () => void };
+
+const FILTER_ORDER: ContentFilter[] = ["all", "point", "description", "comment", "report"];
+const FILTER_LABEL: Record<ContentFilter, string> = {
+  all: "Wszystko",
+  point: "Nowe punkty",
+  description: "Opisy",
+  comment: "Komentarze",
+  report: "Zgłoszenia",
+};
 
 function ContentTab() {
+  const [points, setPoints] = useState<DescriptionItem[] | null>(null);
   const [comments, setComments] = useState<CommentItem[] | null>(null);
-  const [descs, setDescs] = useState<DescriptionItem[] | null>(null);
-  const [filter, setFilter] = useState<ContentFilter>("comments");
+  const [reports, setReports] = useState<ReportItem[] | null>(null);
+  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<ContentFilter>("all");
+  const [search, setSearch] = useState("");
+  const [hideTest, setHideTest] = useState(false);
+  const [editing, setEditing] = useState<EditingPoint | null>(null);
+
   const load = useCallback(() => {
+    fetchAllPoints().then(setPoints).catch(() => toast.error("Błąd punktów i opisów."));
     fetchAllComments().then(setComments).catch(() => toast.error("Błąd komentarzy."));
-    fetchAllDescriptions().then(setDescs).catch(() => toast.error("Błąd opisów."));
+    fetchAllReports().then(setReports).catch(() => toast.error("Błąd zgłoszeń."));
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => watchBlockedUsers(
+    (items) => setBlocked(new Set(items.map((b) => b.uid))),
+    () => toast.error("Błąd listy zablokowanych — status „zablokowany” może być nieaktualny."),
+  ), []);
+
+  if (!points || !comments || !reports) return <Empty text="Ładowanie…" />;
+
+  // Nowy punkt = dokument UGC (apka albo panel); opis = nakładka z treścią na
+  // punkt kuratorowany. Nakładki bez opisu (sam telefon/atrybuty) pomijamy jak dotąd.
+  const isNewPoint = (p: DescriptionItem) => p.pointId.startsWith("UGC:");
+  const pointById = new Map(points.map((p) => [p.pointId, p]));
+
+  const items: ContentItem[] = [
+    ...points.filter(isNewPoint).map((p): ContentItem => (
+      { kind: "point", key: `point/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
+    ...points.filter((p) => !isNewPoint(p) && p.description.length > 0).map((p): ContentItem => (
+      { kind: "description", key: `desc/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
+    ...comments.map((c): ContentItem => (
+      { kind: "comment", key: `comment/${c.pointId}/${c.commentId}`, createdAt: c.createdAt, isTest: c.isTest, c })),
+    ...reports.map((r): ContentItem => (
+      { kind: "report", key: `report/${r.id}`, createdAt: r.createdAt, isTest: r.isTest, r })),
+  ].sort((a, b) => (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity));
+
+  const needle = search.trim().toLowerCase();
+  const haystack = (it: ContentItem): string => {
+    switch (it.kind) {
+      case "point":
+      case "description":
+        return `${it.p.name} ${it.p.pointId} ${it.p.authorName} ${it.p.description}`;
+      case "comment":
+        return `${pointById.get(it.c.pointId)?.name ?? ""} ${it.c.pointId} ${it.c.authorName} ${it.c.text}`;
+      case "report":
+        return `${pointById.get(it.r.pointId)?.name ?? ""} ${it.r.pointId} ${it.r.reason ?? ""}`;
+    }
+  };
+  const visible = items
+    .filter((it) => filter === "all" || it.kind === filter)
+    .filter((it) => !hideTest || !it.isTest)
+    .filter((it) => needle === "" || haystack(it).toLowerCase().includes(needle));
+
+  const counts: Record<ContentFilter, number> = {
+    all: items.length,
+    point: items.filter((i) => i.kind === "point").length,
+    description: items.filter((i) => i.kind === "description").length,
+    comment: items.filter((i) => i.kind === "comment").length,
+    report: items.filter((i) => i.kind === "report").length,
+  };
+  const truncated =
+    points.length >= BROWSE_LIMIT || comments.length >= BROWSE_LIMIT || reports.length >= BROWSE_LIMIT;
 
   return (
     <div className="space-y-3">
-      <FilterChips<ContentFilter>
-        value={filter}
-        onChange={setFilter}
-        options={[
-          { value: "comments", label: `Komentarze (${comments?.length ?? "…"})` },
-          { value: "descs",    label: `Opisy (${descs?.length ?? "…"})` },
-        ]}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <FilterChips<ContentFilter>
+          value={filter}
+          onChange={setFilter}
+          options={FILTER_ORDER.map((v) => ({
+            value: v,
+            label: `${FILTER_LABEL[v]} (${counts[v]})`,
+          }))}
+        />
+        <div className="flex items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-foreground"
+              checked={hideTest}
+              onChange={(e) => setHideTest(e.target.checked)}
+            />
+            Ukryj testowe
+          </label>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Szukaj: punkt, autor, treść…"
+            className="h-8 w-64"
+          />
+          <Button variant="outline" size="sm" className="h-8 gap-1 px-2" onClick={load} title="Odśwież listę">
+            <RotateCw className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <Section title="Wszystkie treści" count={visible.length}>
+        {visible.length === 0 ? (
+          <Empty text="Nic tu nie ma — zmień filtr albo wyszukiwanie." />
+        ) : (
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8" />
+                <TableHead className="w-28">Typ</TableHead>
+                <TableHead className="w-36">Autor</TableHead>
+                <TableHead>Treść</TableHead>
+                <TableHead className="w-32">Stan</TableHead>
+                <TableHead className="w-32">Data</TableHead>
+                <TableHead className="w-12 text-right">Akcje</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((it) => (
+                <ContentRow
+                  key={it.key}
+                  item={it}
+                  pointById={pointById}
+                  blocked={blocked}
+                  onEdit={setEditing}
+                  reload={load}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        {truncated && (
+          <div className="border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
+            ⚠ Któraś z list sięgnęła limitu {BROWSE_LIMIT} — całość może być dłuższa. Zawęź wyszukiwaniem.
+          </div>
+        )}
+      </Section>
+
+      <PointEditDialog
+        point={editing?.p ?? null}
+        onClose={() => setEditing(null)}
+        onSaved={() => { editing?.onSaved?.(); load(); }}
       />
-      {filter === "comments" && (!comments ? (
-          <Empty text="Ładowanie…" />
-        ) : (
-          <div className="overflow-hidden rounded-lg border bg-background">
-            <Table className="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-36">Autor</TableHead>
-                  <TableHead>Treść</TableHead>
-                  <TableHead className="w-28">Stan</TableHead>
-                  <TableHead className="w-28">Status</TableHead>
-                  <TableHead className="w-52 text-right">Akcje</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {comments.map((c) => (
-                  <TableRow key={`${c.pointId}/${c.commentId}`}>
-                    <TableCell className="align-top text-sm">
-                      <div className="flex flex-col gap-1">
-                        <span className="break-words">{c.authorName || "Użytkownik"}</span>
-                        {c.isTest && <TestBadge />}
-                      </div>
-                    </TableCell>
-                    <TableCell className="align-top text-sm">
-                      <p className="line-clamp-3">{c.text}</p>
-                    </TableCell>
-                    <TableCell className="align-top"><StateBadge state={c.state} /></TableCell>
-                    <TableCell className="align-top"><StatusBadge status={c.status} /></TableCell>
-                    <TableCell className="align-top text-right">
-                      <PublishHideButtons
-                        onPublish={
-                          c.state !== "approved"
-                            ? () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Opublikowano", load)
-                            : undefined
-                        }
-                        onHide={
-                          c.status !== "removed"
-                            ? () => confirmHide("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto", load)
-                            : undefined
-                        }
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ))}
-      {filter === "descs" && (!descs ? (
-          <Empty text="Ładowanie…" />
-        ) : (
-          <div className="overflow-hidden rounded-lg border bg-background">
-            <Table className="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-44">Punkt</TableHead>
-                  <TableHead>Opis</TableHead>
-                  <TableHead className="w-28">Stan</TableHead>
-                  <TableHead className="w-60 text-right">Akcje</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {descs.map((p) => (
-                  <TableRow key={p.pointId}>
-                    <TableCell className="align-top text-sm font-medium">
-                      <span className="break-words">{p.name || p.pointId}</span>
-                      <PointProps p={p} />
-                      {p.isTest && <div className="mt-1"><TestBadge /></div>}
-                    </TableCell>
-                    <TableCell className="align-top text-sm">
-                      <p className="line-clamp-4">{p.description}</p>
-                    </TableCell>
-                    <TableCell className="align-top"><StateBadge state={p.state} /></TableCell>
-                    <TableCell className="align-top text-right">
-                      <div className="flex items-center justify-end gap-1">
-                      <PublishHideButtons
-                        onPublish={
-                          p.state !== "approved"
-                            ? () => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano", load)
-                            : undefined
-                        }
-                        onHide={
-                          p.state !== "rejected"
-                            ? () => confirmHide("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Ukryto", load)
-                            : undefined
-                        }
-                      />
-                      <KebabMenu
-                        actions={[
-                          { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(p.pointId, p.name, load) },
-                          ...(mapLink(p.lat, p.lon)
-                            ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
-                            : []),
-                        ]}
-                      />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ))}
     </div>
+  );
+}
+
+// Autor treści + status blokady. Blokada per WIERSZ (nie tylko lista
+// „Zablokowani"), bo decyzję podejmuje się patrząc na treść.
+function AuthorCell({ name, uid, blocked }: { name: string; uid: string; blocked: boolean }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="break-words">{name || "Użytkownik"}</span>
+      {blocked && (
+        <span className="inline-flex w-fit items-center rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+          zablokowany
+        </span>
+      )}
+      {!name && uid && <span className="font-mono text-[10px] text-muted-foreground break-all">{uid}</span>}
+    </div>
+  );
+}
+
+// Akcja blokady/odblokowania autora do kebaba — pusta lista, gdy nie znamy uid
+// (stare dokumenty) albo autorem jest moderator (wpis panelu).
+function blockActions(uid: string, name: string, blocked: Set<string>, after?: () => void): KebabAction[] {
+  if (!uid) return [];
+  return blocked.has(uid)
+    ? [{ label: "Odblokuj autora", onClick: () => actUnblock(uid, after) }]
+    : [{ label: "Zablokuj autora", variant: "destructive", onClick: () => actBlock(uid, name, after) }];
+}
+
+function ContentRow({
+  item,
+  pointById,
+  blocked,
+  onEdit,
+  reload,
+}: {
+  item: ContentItem;
+  pointById: Map<string, DescriptionItem>;
+  blocked: Set<string>;
+  onEdit: (e: EditingPoint) => void;
+  reload: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Cel zgłoszenia — doładowywany w TLE tylko dla OTWARTYCH zgłoszeń (akcje na
+  // celu). Zamknięte zgłoszenie jest zapisem historycznym, bez akcji.
+  const isOpenReport = item.kind === "report" && item.r.status === "open";
+  const [target, setTarget] = useState<CommentItem | DescriptionItem | null | undefined>(undefined);
+  const reportPointId = item.kind === "report" ? item.r.pointId : "";
+  const reportCommentId = item.kind === "report" ? item.r.commentId : null;
+  useEffect(() => {
+    if (!isOpenReport) return;
+    let alive = true;
+    const p = reportCommentId
+      ? fetchCommentById(reportPointId, reportCommentId)
+      : fetchDescriptionById(reportPointId);
+    p.then((t) => alive && setTarget(t)).catch(() => alive && setTarget(null));
+    return () => { alive = false; };
+  }, [isOpenReport, reportPointId, reportCommentId]);
+
+  let author: React.ReactNode;
+  let content: React.ReactNode;
+  let state: React.ReactNode;
+  let kebab: KebabAction[] = [];
+  let historyPointId = "";
+  let historyCommentId: string | null = null;
+
+  const titleOf = (pointId: string, fallback?: string) =>
+    pointById.get(pointId)?.name || fallback || pointId;
+
+  switch (item.kind) {
+    case "point":
+    case "description": {
+      const p = item.p;
+      const isPanelPoint = p.createdVia === "moderation-panel";
+      author = <AuthorCell name={p.authorName} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />;
+      content = (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold break-words">{p.name || p.pointId}</span>
+          <PointProps p={p} />
+          {p.description ? (
+            <p className="line-clamp-3 whitespace-pre-wrap break-words">{p.description}</p>
+          ) : (
+            <span className="text-xs italic text-muted-foreground">bez opisu</span>
+          )}
+        </div>
+      );
+      state = <StateBadge state={p.state} />;
+      kebab = [
+        { label: "Edytuj punkt", onClick: () => onEdit({ p }) },
+        ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
+        ...(p.description && p.state !== "approved"
+          ? [{ label: "Opublikuj opis", onClick: () => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano", reload) }]
+          : []),
+        ...(p.description && p.state !== "rejected"
+          ? [{
+              label: "Ukryj opis",
+              onClick: () => confirmHide("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Ukryto", reload),
+            }]
+          : []),
+        ...(isPanelPoint ? [] : blockActions(p.authorUid, p.authorName, blocked)),
+        { label: "Usuń punkt", variant: "destructive", onClick: () => actDeletePoint(p.pointId, p.name, reload) },
+      ];
+      historyPointId = p.pointId;
+      break;
+    }
+    case "comment": {
+      const c = item.c;
+      const parent = pointById.get(c.pointId);
+      author = <AuthorCell name={c.authorName} uid={c.authorUid} blocked={blocked.has(c.authorUid)} />;
+      content = (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold break-words">{titleOf(c.pointId)}</span>
+          {c.text
+            ? <p className="line-clamp-3 whitespace-pre-wrap break-words">{c.text}</p>
+            : <span className="text-xs italic text-muted-foreground">[brak treści]</span>}
+        </div>
+      );
+      state = (
+        <div className="flex flex-col items-start gap-1">
+          <StateBadge state={c.state} />
+          {c.status !== "active" && <StatusBadge status={c.status} />}
+        </div>
+      );
+      kebab = [
+        ...(c.state !== "approved"
+          ? [{ label: "Opublikuj komentarz", onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Opublikowano", reload) }]
+          : []),
+        ...(c.status !== "removed"
+          ? [{
+              label: "Ukryj komentarz",
+              onClick: () => confirmHide("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto", reload),
+            }]
+          : []),
+        ...(parent && mapLink(parent.lat, parent.lon) ? [{ label: "Pokaż na mapie", href: mapLink(parent.lat, parent.lon)! }] : []),
+        ...blockActions(c.authorUid, c.authorName, blocked),
+      ];
+      historyPointId = c.pointId;
+      historyCommentId = c.commentId;
+      break;
+    }
+    case "report": {
+      const r = item.r;
+      const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
+      author = (
+        <span className="font-mono text-[10px] text-muted-foreground break-all">{r.reporterUid || "—"}</span>
+      );
+      content = (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold break-words">
+            {titleOf(r.pointId)}
+            <span className="ml-2 font-normal text-xs text-muted-foreground">
+              {TARGET_LABEL[r.target] ?? r.target} · {reason}
+            </span>
+          </span>
+          {r.reason
+            ? <p className="line-clamp-3 whitespace-pre-wrap break-words">{r.reason}</p>
+            : <span className="text-xs italic text-muted-foreground">bez uzasadnienia</span>}
+        </div>
+      );
+      state = <ReportStatusBadge r={r} />;
+      if (isOpenReport) {
+        const closeActioned = () =>
+          act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte", reload);
+        const c = target && r.target === "comment" ? (target as CommentItem) : null;
+        const p = target && r.target !== "comment" ? (target as DescriptionItem) : null;
+        const hidden = target?.state === "rejected";
+        kebab = [
+          ...(c
+            ? [
+                hidden
+                  ? { label: "Opublikuj komentarz", onClick: () => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz opublikowany", closeActioned) }
+                  : {
+                      label: "Ukryj komentarz",
+                      onClick: () =>
+                        confirmHide("komentarz") &&
+                        act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz ukryty", closeActioned),
+                    },
+                ...blockActions(c.authorUid, c.authorName, blocked),
+              ]
+            : []),
+          ...(p
+            ? [
+                { label: "Edytuj punkt", onClick: () => onEdit({ p, onSaved: closeActioned }) },
+                hidden
+                  ? { label: "Opublikuj opis", onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Opis opublikowany", closeActioned) }
+                  : {
+                      label: "Ukryj opis",
+                      onClick: () => confirmHide("opis") && act({ action: "rejectDescription", pointId: r.pointId }, "Opis ukryty", closeActioned),
+                    },
+                ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
+                // Parytet z wierszem opisu: autora da się zablokować także z
+                // poziomu zgłoszenia (chyba że to wpis panelu).
+                ...(p.createdVia === "moderation-panel" ? [] : blockActions(p.authorUid, p.authorName, blocked)),
+                { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned) },
+              ]
+            : []),
+          {
+            label: "Odrzuć zgłoszenie",
+            onClick: () => act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)", reload),
+          },
+        ];
+      } else {
+        const parent = pointById.get(r.pointId);
+        kebab = parent && mapLink(parent.lat, parent.lon) ? [{ label: "Pokaż na mapie", href: mapLink(parent.lat, parent.lon)! }] : [];
+      }
+      historyPointId = r.pointId;
+      historyCommentId = r.commentId;
+      break;
+    }
+  }
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="align-top">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+            title={item.kind === "report" ? "Zgłoszona treść i historia decyzji" : "Historia decyzji"}
+          >
+            {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+        </TableCell>
+        <TableCell className="align-top">
+          <div className="flex flex-col items-start gap-1">
+            <KindBadge kind={item.kind} />
+            {item.isTest && <TestBadge />}
+          </div>
+        </TableCell>
+        <TableCell className="align-top text-sm">{author}</TableCell>
+        <TableCell className="align-top text-sm">{content}</TableCell>
+        <TableCell className="align-top">{state}</TableCell>
+        <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(item.createdAt)}</TableCell>
+        <TableCell className="align-top text-right">
+          <KebabMenu actions={kebab} />
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={7} className="bg-muted/30">
+            <div className="space-y-3 py-1">
+              {item.kind === "report" && (
+                target === undefined && isOpenReport ? (
+                  <span className="text-xs text-muted-foreground">Ładowanie zgłoszonej treści…</span>
+                ) : target ? (
+                  <ReportPreview target={target} isComment={item.r.target === "comment"} />
+                ) : (
+                  <span className="text-xs text-muted-foreground">Zgłoszona treść niedostępna (usunięta albo zgłoszenie zamknięte).</span>
+                )
+              )}
+              <HistoryPanel pointId={historyPointId} commentId={historyCommentId} />
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
