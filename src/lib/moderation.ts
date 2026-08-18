@@ -106,6 +106,33 @@ export function descriptionContributor(
   return null;
 }
 
+/**
+ * Data OPISU — jedno źródło prawdy dla wiersza, który jest opisem (kolejka
+ * „Opisy do sprawdzenia" i wiersz `description` w „Wszystkich treściach").
+ *
+ * ⛔ `createdAt` to data powstania PUNKTU i dla opisu jest zwyczajnie inną datą.
+ * Opis dopisany do cudzego (albo firmowego) punktu nie zmienia `createdAt`, więc
+ * kolumna „Data" pokazywała, kiedy punkt trafił do bazy — czasem miesiąc przed
+ * powstaniem opisu, o którego moderacji ten wiersz decyduje. Zgłoszone przez
+ * usera 0818 na `Schronisko PTTK na Szyndzielni`: opis z 17.08 podpisany datą
+ * 23.07 (utworzenie punktu przez „Zespół Hyc!").
+ *
+ * ⚠ Data jest też KLUCZEM SORTU — po `createdAt` świeży opis na starym punkcie
+ * wpada między stare wiersze i przy stronie 50 pozycji moderator go nie widzi.
+ *
+ * ⛔ BEZ fallbacku na `createdAt`, gdy pola brak (dokument sprzed
+ * `descriptionAddedAt`). Fallback wyglądałby na ostrożny, a przywracałby
+ * DOKŁADNIE naprawiany błąd — datę punktu podpisaną jako datę opisu — i to
+ * cicho, w jedynym miejscu, gdzie w ogóle mógłby się odpalić: `orderBy` w
+ * [fetchContentPoints] pomija dokumenty bez tego pola, więc żywą ścieżką
+ * zostaje sama kolejka. Nie wiemy, kiedy opis powstał → `fmtDate` pokaże „—".
+ * Ten sam standard dowodu, co [descriptionContributor]: brak atrybucji zamiast
+ * fałszywej.
+ */
+export function descriptionDate(p: DescriptionItem): number | null {
+  return p.descriptionAddedAt;
+}
+
 export type ReportItem = {
   id: string;
   target: "point" | "description" | "comment";
@@ -222,6 +249,10 @@ function mapLog(d: DocumentData, id: string): LogItem {
 const byNewest = (a: { createdAt: number | null }, b: { createdAt: number | null }) =>
   (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity);
 
+/** Sort listy OPISÓW — po dacie opisu, nie punktu. Patrz [descriptionDate]. */
+const byNewestDescription = (a: DescriptionItem, b: DescriptionItem) =>
+  (descriptionDate(b) ?? -Infinity) - (descriptionDate(a) ?? -Infinity);
+
 /** Komentarze needs_review (collectionGroup) — live. */
 export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e: unknown) => void) {
   const q = query(
@@ -255,7 +286,7 @@ export function watchDescriptionsQueue(cb: (items: DescriptionItem[]) => void, o
       const out = snap.docs
         .map((d) => mapDescription(d.data(), d.id))
         .filter((p) => p.description.length > 0);
-      out.sort(byNewest);
+      out.sort(byNewestDescription);
       cb(out);
     },
     onErr,
@@ -317,7 +348,9 @@ export async function fetchContentPoints(
     // Punkt UGC z opisem jest już w `newPoints` — w widoku ma być JEDNYM wierszem.
     .filter((p) => !ugcIds.has(p.pointId) && p.description.length > 0);
   newPoints.sort(byNewest);
-  described.sort(byNewest);
+  // ⛔ NIE `byNewest` — to zdejmowało `orderBy("descriptionAddedAt","desc")` z
+  // zapytania wyżej i przestawiało listę z powrotem na daty punktów.
+  described.sort(byNewestDescription);
   return {
     newPoints,
     described,
