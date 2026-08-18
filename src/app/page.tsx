@@ -67,6 +67,7 @@ import {
   type BlockedItem,
 } from "@/lib/moderation";
 import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, aiLabel, fmtDate } from "@/lib/labels";
+import { formatPhoneDisplay } from "@/lib/phone";
 
 export default function Home() {
   return <AuthGate>{({ user, signOut }) => <Panel email={user.email ?? ""} signOut={signOut} />}</AuthGate>;
@@ -545,6 +546,25 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
   );
 }
 
+// Podgląd numeru w kształcie, w jakim wyrenderuje go apka. Pole zostaje SUROWE —
+// panel niczego nie przepisuje w bazie, bo numer pochodzi ze źródła (OSM, rejestr)
+// i przepisanie go przy każdej edycji punktu zacierałoby ten zapis. Reguła formatu
+// jest kopią `lib/core/models/phone_number.dart` z apki — patrz `@/lib/phone`.
+function PhonePreview({ value }: { value: string }) {
+  const trimmed = value.trim();
+  // ⛔ Wpis bez ani jednej cyfry NIE dojdzie do apki: serwerowy `sanitizePhone`
+  // rzuca, a apkowy `normalizePhone` zwraca null i wiersz telefonu w ogóle się nie
+  // renderuje. Podgląd musi wtedy MILCZEĆ — pokazanie „W apce: ---" obiecywałoby
+  // moderatorowi ekran, którego nigdy nie będzie.
+  if (!trimmed || !/\d/.test(trimmed)) return null;
+  return (
+    <span className="block text-xs text-muted-foreground">
+      W apce:{" "}
+      <span className="font-medium text-foreground">{formatPhoneDisplay(trimmed)}</span>
+    </span>
+  );
+}
+
 // Inline formularz kuratorskiej edycji punktu (rozwijany pod wierszem). Wysyła
 // tylko ZMIENIONE pola (callable wymaga ≥1). Zmiana nazwy/opisu → serwer zapisuje
 // approved + contentHash (bez re-moderacji). Bez nowej zależności (Input/Select/
@@ -658,6 +678,7 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
           inputMode="tel"
           placeholder="+48 902 092 012"
         />
+        <PhonePreview value={phone} />
       </label>
       <div className="flex flex-wrap gap-4">
         {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
@@ -891,6 +912,7 @@ function AddPointForm() {
               inputMode="tel"
               placeholder="+48 902 092 012"
             />
+            <PhonePreview value={phone} />
           </label>
 
           <div className="flex flex-wrap gap-4">
