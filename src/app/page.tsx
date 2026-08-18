@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff, Pencil, Plus, RotateCw } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
@@ -73,7 +73,17 @@ import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, aiLabel, fmtDate } from "@/li
 import { formatPhoneDisplay } from "@/lib/phone";
 
 export default function Home() {
-  return <AuthGate>{({ user, signOut }) => <Panel email={user.email ?? ""} signOut={signOut} />}</AuthGate>;
+  // Provider WEWNĄTRZ AuthGate — subskrypcja blokad startuje dopiero po
+  // zalogowaniu moderatora (przed nim Firestore i tak odrzuci odczyt).
+  return (
+    <AuthGate>
+      {({ user, signOut }) => (
+        <BlockedProvider>
+          <Panel email={user.email ?? ""} signOut={signOut} />
+        </BlockedProvider>
+      )}
+    </AuthGate>
+  );
 }
 
 // Lock PER-CEL (nie globalny): różne wiersze działają równolegle, ta sama akcja
@@ -171,6 +181,39 @@ async function actUnblock(targetUid: string, after?: () => void) {
 function mapLink(lat: number | null, lon: number | null): string | undefined {
   if (lat === null || lon === null) return undefined;
   return `https://mapy.cz/turisticka?x=${lon}&y=${lat}&z=16`;
+}
+
+// Jedno źródło prawdy o blokadach dla CAŁEJ strony: jedna subskrypcja
+// `watchBlockedUsers`, nie osobna w każdej zakładce. Bez tego kolejki nie
+// wiedziały, kto jest już zablokowany, i kebab oferował wyłącznie „Zablokuj
+// autora" — odblokować dało się tylko z „Wszystkich treści".
+type BlockedState = {
+  /** null = jeszcze się ładuje (zakładka „Zablokowani" pokazuje wtedy „Ładowanie…"). */
+  rows: BlockedItem[] | null;
+  /** Zbiór uid — do etykiety „Zablokuj"/„Odblokuj" w kebabie. */
+  uids: Set<string>;
+  error: string | null;
+};
+
+const BlockedContext = createContext<BlockedState>({ rows: null, uids: new Set(), error: null });
+const useBlocked = () => useContext(BlockedContext);
+
+function BlockedProvider({ children }: { children: React.ReactNode }) {
+  const [rows, setRows] = useState<BlockedItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => watchBlockedUsers(
+    (items) => { setError(null); setRows(items); },
+    () => {
+      setError("Nie udało się wczytać listy zablokowanych.");
+      setRows([]);
+      toast.error("Błąd listy zablokowanych — status „zablokowany” może być nieaktualny.");
+    },
+  ), []);
+  const value = useMemo<BlockedState>(
+    () => ({ rows, uids: new Set((rows ?? []).map((b) => b.uid)), error }),
+    [rows, error],
+  );
+  return <BlockedContext.Provider value={value}>{children}</BlockedContext.Provider>;
 }
 
 function Panel({ email, signOut }: { email: string; signOut: () => void }) {
@@ -483,6 +526,7 @@ function KebabMenu({ actions, header }: { actions: KebabAction[]; header?: strin
 
 function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((c) => !c.isTest) : items;
+  const { uids: blocked } = useBlocked();
   return (
     <Section title="Komentarze do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
@@ -529,15 +573,7 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
                         act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto")
                       }
                     />
-                    <KebabMenu
-                      actions={[
-                        {
-                          label: "Zablokuj autora",
-                          variant: "destructive",
-                          onClick: () => actBlock(c.authorUid, c.authorName),
-                        },
-                      ]}
-                    />
+                    <KebabMenu actions={blockActions(c.authorUid, c.authorName, blocked)} />
                   </div>
                 </TableCell>
               </TableRow>
@@ -951,35 +987,10 @@ function AddPointDialog({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-/**
- * „Zablokuj autora" w kolejce opisów — celuje w autora OPISU, bo to jego treść
- * jest tu moderowana.
- *
- * ⛔ Wcześniej szło `actBlock(p.authorUid, …)`, czyli w twórcę PUNKTU: moderator
- * odrzucający obraźliwy opis dopisany do cudzego punktu blokował niewinną osobę,
- * a przy punkcie z panelu — konto „Zespół Hyc!". Ta sama klasa błędu, którą
- * cb06c8d naprawił w „Wszystkich treściach"; kolejka została wtedy pominięta.
- *
- * Brak uid autora opisu (opis przepisany z panelu albo legacy bez atrybucji) →
- * ZERO akcji, nie strzał w twórcę punktu: nie wiemy, kogo blokować.
- */
-function queueBlockAuthorAction(p: DescriptionItem): KebabAction[] {
-  const opisAutor = descriptionContributor(p);
-  const uid = opisAutor?.uid;
-  if (!uid) return [];
-  // Doprecyzowanie „opisu" tylko wtedy, gdy w wierszu są DWIE osoby — inaczej
-  // etykieta sugerowałaby drugiego autora tam, gdzie jest jeden.
-  const label = uid === p.authorUid ? "Zablokuj autora" : `Zablokuj autora opisu (${opisAutor.name})`;
-  return [{
-    label,
-    variant: "destructive",
-    onClick: () => actBlock(uid, opisAutor.name),
-  }];
-}
-
 function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
   const [editingId, setEditingId] = useState<string | null>(null);
+  const { uids: blocked } = useBlocked();
   return (
     <Section title="Opisy do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
@@ -1023,7 +1034,20 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                           label: "Edytuj punkt",
                           onClick: () => setEditingId(p.pointId),
                         },
-                        ...queueBlockAuthorAction(p),
+                        // Kolejka opisów moderuje OPIS, więc blokada celuje w jego
+                        // autora (#615), nie w twórcę punktu. Przy nieznanej
+                        // atrybucji `descriptionContributor` zwraca null / uid null
+                        // — wtedy akcji NIE MA w ogóle, żeby nie zablokować
+                        // niewinnego twórcy punktu za cudzy opis.
+                        ...(() => {
+                          const a = descriptionContributor(p);
+                          if (!a?.uid) return [];
+                          // Doprecyzowanie „opisu" tylko wtedy, gdy w wierszu są DWIE
+                          // osoby — inaczej etykieta sugerowałaby drugiego autora tam,
+                          // gdzie jest jeden.
+                          const label = a.uid === p.authorUid ? undefined : `Zablokuj autora opisu (${a.name})`;
+                          return blockActions(a.uid, a.name, blocked, undefined, label);
+                        })(),
                         {
                           label: "Usuń punkt",
                           variant: "destructive",
@@ -1169,6 +1193,7 @@ function ReportRow({ r }: { r: ReportItem }) {
 // „Odrzuć zgłoszenie" (dismissed) działa zawsze, także zanim cel się doładuje.
 function ReportActions({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem | null | undefined; isComment: boolean }) {
   const [editing, setEditing] = useState(false);
+  const { uids: blocked } = useBlocked();
   const c = target && isComment ? (target as CommentItem) : null;
   const p = target && !isComment ? (target as DescriptionItem) : null;
   const hidden = target?.state === "rejected"; // ukryty w aplikacji
@@ -1179,13 +1204,7 @@ function ReportActions({ r, target, isComment }: { r: ReportItem; target: Commen
 
   // Kebab = akcje drugorzędne, zależne od typu celu (pusty, gdy cel się nie doładował).
   const kebab: KebabAction[] = c
-    ? [
-        {
-          label: "Zablokuj autora",
-          variant: "destructive",
-          onClick: () => actBlock(c.authorUid, c.authorName),
-        },
-      ]
+    ? blockActions(c.authorUid, c.authorName, blocked)
     : p
       ? [
           {
@@ -1443,14 +1462,7 @@ function HistoryPanel({ pointId, commentId }: { pointId: string; commentId: stri
 }
 
 function BlockedTab() {
-  const [rows, setRows] = useState<BlockedItem[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    return watchBlockedUsers(
-      (items) => { setErr(null); setRows(items); },
-      () => { setErr("Nie udało się wczytać listy zablokowanych."); setRows([]); },
-    );
-  }, []);
+  const { rows, error: err } = useBlocked();
 
   if (rows === null) return <Empty text="Ładowanie…" />;
 
@@ -1565,7 +1577,7 @@ function ContentTab() {
   // znaczy „punktu nie ma w bazie" (usunięty) — i tylko wtedy wolno tak napisać;
   // bez tego zbioru nie odróżnisz usuniętego od jeszcze-nie-pobranego.
   const [probedIds, setProbedIds] = useState<Set<string>>(new Set());
-  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  const { uids: blocked } = useBlocked();
   const [filter, setFilter] = useState<ContentFilter>("all");
   const [search, setSearch] = useState("");
   const [hideTest, setHideTest] = useState(false);
@@ -1582,10 +1594,6 @@ function ContentTab() {
     fetchAllReports(take).then(setReports).catch(() => toast.error("Błąd zgłoszeń."));
   }, []);
   useEffect(() => { load(fetchTake); }, [load, fetchTake]);
-  useEffect(() => watchBlockedUsers(
-    (items) => setBlocked(new Set(items.map((b) => b.uid))),
-    () => toast.error("Błąd listy zablokowanych — status „zablokowany” może być nieaktualny."),
-  ), []);
   // Dociąg rodziców, których nie ma w pobranej stronie punktów — inaczej wiersz
   // komentarza/zgłoszenia pokazuje gołe id zamiast nazwy widocznej w aplikacji.
   useEffect(() => {
