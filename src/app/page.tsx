@@ -50,6 +50,7 @@ import {
   fetchPointsByIds,
   fetchUserNames,
   descriptionContributor,
+  descriptionDate,
   fetchCommentById,
   fetchDescriptionById,
   fetchLogFor,
@@ -69,6 +70,7 @@ import {
   type BlockedItem,
 } from "@/lib/moderation";
 import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, aiLabel, fmtDate } from "@/lib/labels";
+import { formatPhoneDisplay } from "@/lib/phone";
 
 export default function Home() {
   return <AuthGate>{({ user, signOut }) => <Panel email={user.email ?? ""} signOut={signOut} />}</AuthGate>;
@@ -547,6 +549,25 @@ function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error
   );
 }
 
+// Podgląd numeru w kształcie, w jakim wyrenderuje go apka. Pole zostaje SUROWE —
+// panel niczego nie przepisuje w bazie, bo numer pochodzi ze źródła (OSM, rejestr)
+// i przepisanie go przy każdej edycji punktu zacierałoby ten zapis. Reguła formatu
+// jest kopią `lib/core/models/phone_number.dart` z apki — patrz `@/lib/phone`.
+function PhonePreview({ value }: { value: string }) {
+  const trimmed = value.trim();
+  // ⛔ Wpis bez ani jednej cyfry NIE dojdzie do apki: serwerowy `sanitizePhone`
+  // rzuca, a apkowy `normalizePhone` zwraca null i wiersz telefonu w ogóle się nie
+  // renderuje. Podgląd musi wtedy MILCZEĆ — pokazanie „W apce: ---" obiecywałoby
+  // moderatorowi ekran, którego nigdy nie będzie.
+  if (!trimmed || !/\d/.test(trimmed)) return null;
+  return (
+    <span className="block text-xs text-muted-foreground">
+      W apce:{" "}
+      <span className="font-medium text-foreground">{formatPhoneDisplay(trimmed)}</span>
+    </span>
+  );
+}
+
 // Inline formularz kuratorskiej edycji punktu (rozwijany pod wierszem). Wysyła
 // tylko ZMIENIONE pola (callable wymaga ≥1). Zmiana nazwy/opisu → serwer zapisuje
 // approved + contentHash (bez re-moderacji). Bez nowej zależności (Input/Select/
@@ -660,6 +681,7 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
           inputMode="tel"
           placeholder="+48 902 092 012"
         />
+        <PhonePreview value={phone} />
       </label>
       <div className="flex flex-wrap gap-4">
         {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
@@ -893,6 +915,7 @@ function AddPointForm() {
               inputMode="tel"
               placeholder="+48 902 092 012"
             />
+            <PhonePreview value={phone} />
           </label>
 
           <div className="flex flex-wrap gap-4">
@@ -928,6 +951,32 @@ function AddPointDialog({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
+/**
+ * „Zablokuj autora" w kolejce opisów — celuje w autora OPISU, bo to jego treść
+ * jest tu moderowana.
+ *
+ * ⛔ Wcześniej szło `actBlock(p.authorUid, …)`, czyli w twórcę PUNKTU: moderator
+ * odrzucający obraźliwy opis dopisany do cudzego punktu blokował niewinną osobę,
+ * a przy punkcie z panelu — konto „Zespół Hyc!". Ta sama klasa błędu, którą
+ * cb06c8d naprawił w „Wszystkich treściach"; kolejka została wtedy pominięta.
+ *
+ * Brak uid autora opisu (opis przepisany z panelu albo legacy bez atrybucji) →
+ * ZERO akcji, nie strzał w twórcę punktu: nie wiemy, kogo blokować.
+ */
+function queueBlockAuthorAction(p: DescriptionItem): KebabAction[] {
+  const opisAutor = descriptionContributor(p);
+  const uid = opisAutor?.uid;
+  if (!uid) return [];
+  // Doprecyzowanie „opisu" tylko wtedy, gdy w wierszu są DWIE osoby — inaczej
+  // etykieta sugerowałaby drugiego autora tam, gdzie jest jeden.
+  const label = uid === p.authorUid ? "Zablokuj autora" : `Zablokuj autora opisu (${opisAutor.name})`;
+  return [{
+    label,
+    variant: "destructive",
+    onClick: () => actBlock(uid, opisAutor.name),
+  }];
+}
+
 function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -959,7 +1008,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                 <TableCell className="align-top text-sm">
                   <p className="whitespace-pre-wrap break-words">{p.description}</p>
                 </TableCell>
-                <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(p.createdAt)}</TableCell>
+                <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(descriptionDate(p))}</TableCell>
                 <TableCell className="align-top text-right">
                   <div className="flex items-center justify-end gap-1">
                     <PublishHideButtons
@@ -974,11 +1023,7 @@ function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[
                           label: "Edytuj punkt",
                           onClick: () => setEditingId(p.pointId),
                         },
-                        {
-                          label: "Zablokuj autora",
-                          variant: "destructive",
-                          onClick: () => actBlock(p.authorUid, p.authorName),
-                        },
+                        ...queueBlockAuthorAction(p),
                         {
                           label: "Usuń punkt",
                           variant: "destructive",
@@ -1603,8 +1648,11 @@ function ContentTab() {
   const items: ContentItem[] = [
     ...content.newPoints.map((p): ContentItem => (
       { kind: "point", key: `point/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
+    // Wiersz opisu niesie datę OPISU — i jako wyświetlaną, i jako klucz sortu
+    // niżej. `p.createdAt` (data punktu) kłamał w obu rolach — patrz
+    // [descriptionDate].
     ...content.described.map((p): ContentItem => (
-      { kind: "description", key: `desc/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
+      { kind: "description", key: `desc/${p.pointId}`, createdAt: descriptionDate(p), isTest: p.isTest, p })),
     ...comments.map((c): ContentItem => (
       { kind: "comment", key: `comment/${c.pointId}/${c.commentId}`, createdAt: c.createdAt, isTest: c.isTest, c })),
     ...reports.map((r): ContentItem => (
@@ -1867,10 +1915,29 @@ function ContentRow({
       // to lustrzyć. Pokazujemy oba tylko wtedy, gdy się różnią.
       const opisAutor = p.description ? descriptionContributor(p) : null;
       const opisInny = !!opisAutor && opisAutor.uid !== p.authorUid;
+      // ⛔ W wierszu `description` pierwszoplanowy jest autor OPISU, bo to jego
+      // treść moderujemy. Odwrotna kolejność podpisywała cudzy opis twórcą
+      // punktu — przy punktach z panelu wychodziło „Zespół Hyc!" pogrubione nad
+      // opisem, którego zespół nie napisał (zgłoszenie usera 0818). Wiersz
+      // `point` zostaje bez zmian: tam bohaterem jest właśnie twórca punktu.
+      const opisNaCzele = item.kind === "description" && opisInny;
       author = (
         <div className="flex flex-col gap-1">
-          <AuthorCell name={nameOf(p.authorName, p.authorUid)} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />
-          {opisInny && (
+          {opisNaCzele ? (
+            <>
+              <AuthorCell
+                name={opisAutor.name}
+                uid={opisAutor.uid ?? ""}
+                blocked={!!opisAutor.uid && blocked.has(opisAutor.uid)}
+              />
+              <span className="text-xs text-muted-foreground" title={p.authorUid || undefined}>
+                punkt: {nameOf(p.authorName, p.authorUid)}
+              </span>
+            </>
+          ) : (
+            <AuthorCell name={nameOf(p.authorName, p.authorUid)} uid={p.authorUid} blocked={blocked.has(p.authorUid)} />
+          )}
+          {opisInny && !opisNaCzele && (
             <span className="text-xs text-muted-foreground" title={opisAutor.uid ?? undefined}>
               opis: {opisAutor.name}
             </span>
