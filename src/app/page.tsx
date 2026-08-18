@@ -1227,7 +1227,7 @@ function ReportActions({ r, target, isComment }: { r: ReportItem; target: Commen
 function PointPhotos({ pointId }: { pointId: string }) {
   const [photos, setPhotos] = useState<PhotoItem[] | null>(null);
   // Zdjęcia zdjęte w tej sesji — optymistyczne zejście z listy bez refetcha.
-  const [gone, setGone] = useState<Set<string>>(new Set());
+  const [gone, setGone] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     let alive = true;
     fetchPhotosForPoint(pointId)
@@ -1272,7 +1272,9 @@ function PointPhotos({ pointId }: { pointId: string }) {
       <div className="mt-1 flex flex-wrap gap-2">
         {visible.map((f) => (
           <figure key={f.id} className="w-28">
-            <a href={f.fullUrl} target="_blank" rel="noreferrer" title="Otwórz pełny rozmiar">
+            {/* Po sanityzacji adres bywa pusty — wtedy kotwica bez href
+                (miniatura zostaje, bez klikalnego wyjścia donikąd). */}
+            <a href={f.fullUrl || undefined} target="_blank" rel="noreferrer" title="Otwórz pełny rozmiar">
               {/* eslint-disable-next-line @next/next/no-img-element -- thumb z R2, bez optymalizatora Nexta */}
               <img
                 src={f.thumbUrl}

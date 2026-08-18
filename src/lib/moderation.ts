@@ -550,15 +550,28 @@ export type PhotoItem = {
   removedByModerator: boolean;
 };
 
+/** Obrona w głąb: adres idzie w `href`/`src`, więc wpuszczamy tylko https. */
+function httpsOnly(v: unknown): string {
+  return typeof v === "string" && v.startsWith("https://") ? v : "";
+}
+
+const PHOTO_STATUSES = new Set(["pending", "visible", "removed"]);
+
 function mapPhoto(d: DocumentData, id: string): PhotoItem {
   return {
     id,
     pointId: typeof d.pointId === "string" ? d.pointId : null,
     authorUid: d.authorUid ?? "",
-    authorName: d.authorName ?? "",
-    status: d.status ?? "pending",
-    thumbUrl: d.thumbUrl ?? "",
-    fullUrl: d.fullUrl ?? "",
+    // Nazwa leci m.in. do window.confirm — znaki sterujące/nowe linie mogłyby
+    // rozłamać treść dialogu, normalizujemy do pojedynczych spacji.
+    authorName: typeof d.authorName === "string"
+      ? d.authorName.replace(/\s+/g, " ").trim()
+      : "",
+    // Nieznany status → pending (ukryty) — śmieć z bazy nie ma się doliczać
+    // do żadnej sekcji (apka analogicznie nie pokazuje nieznanych statusów).
+    status: PHOTO_STATUSES.has(d.status) ? d.status : "pending",
+    thumbUrl: httpsOnly(d.thumbUrl),
+    fullUrl: httpsOnly(d.fullUrl),
     createdAt: millis(d.createdAt),
     removedByModerator: !!d.removedByModerator,
   };
