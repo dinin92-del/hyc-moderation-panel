@@ -50,6 +50,7 @@ export const FLAG_LABEL: Record<string, string> = {
   zly_opis: "Niewłaściwy opis",
   bledne_dane: "Błędne dane",
   spam_falszywy: "Spam / fałszywy / reklama",
+  kiepskie_zdjecia: "Zdjęcia kiepskie lub niepomocne",
   inne: "Inne",
 };
 

@@ -565,3 +565,67 @@ export async function fetchDescriptionById(pointId: string): Promise<Description
   const snap = await getDoc(doc(db, "points", pointId));
   return snap.exists() ? mapDescription(snap.data(), snap.id) : null;
 }
+
+// ── Zdjęcia punktu (photos/{id}) — wątek zdjęć 0818 ──────────────────────────
+// Dokumenty tworzy wyłącznie serwer apki (reservePhotoUpload); moderator może
+// zdjąć KAŻDE zdjęcie callable'em photoModeratorDelete (wymóg sklepów dla
+// treści użytkowników). Status `removed` zostaje jako ślad — wgląd bez plików.
+export type PhotoItem = {
+  id: string;
+  pointId: string | null;
+  authorUid: string;
+  authorName: string;
+  /** `pending` | `visible` | `removed` */
+  status: string;
+  thumbUrl: string;
+  fullUrl: string;
+  createdAt: number | null;
+  removedByModerator: boolean;
+};
+
+/** Obrona w głąb: adres idzie w `href`/`src`, więc wpuszczamy tylko https. */
+function httpsOnly(v: unknown): string {
+  return typeof v === "string" && v.startsWith("https://") ? v : "";
+}
+
+const PHOTO_STATUSES = new Set(["pending", "visible", "removed"]);
+
+function mapPhoto(d: DocumentData, id: string): PhotoItem {
+  return {
+    id,
+    pointId: typeof d.pointId === "string" ? d.pointId : null,
+    authorUid: d.authorUid ?? "",
+    // Nazwa leci m.in. do window.confirm — znaki sterujące/nowe linie mogłyby
+    // rozłamać treść dialogu, normalizujemy do pojedynczych spacji.
+    authorName: typeof d.authorName === "string"
+      ? d.authorName.replace(/\s+/g, " ").trim()
+      : "",
+    // Nieznany status → pending (ukryty) — śmieć z bazy nie ma się doliczać
+    // do żadnej sekcji (apka analogicznie nie pokazuje nieznanych statusów).
+    status: PHOTO_STATUSES.has(d.status) ? d.status : "pending",
+    thumbUrl: httpsOnly(d.thumbUrl),
+    fullUrl: httpsOnly(d.fullUrl),
+    createdAt: millis(d.createdAt),
+    removedByModerator: !!d.removedByModerator,
+  };
+}
+
+/**
+ * Zdjęcia punktu — WSZYSTKIE statusy (moderacja potrzebuje wglądu także w
+ * usunięte). Jedno równościowe where = bez indeksu złożonego; zdjęć per punkt
+ * jest z definicji garść (limit 5 visible + ślady).
+ */
+export async function fetchPhotosForPoint(pointId: string): Promise<PhotoItem[]> {
+  const snap = await getDocs(
+    query(collection(db, "photos"), where("pointId", "==", pointId), limit(50)),
+  );
+  const out = snap.docs.map((d) => mapPhoto(d.data(), d.id));
+  out.sort(byNewest);
+  return out;
+}
+
+/** Zdejmuje zdjęcie ręką moderatora (photoModeratorDelete, status→removed). */
+export async function moderatorDeletePhoto(photoId: string): Promise<void> {
+  const fn = httpsCallable(functions, "photoModeratorDelete");
+  await fn({ photoId });
+}
