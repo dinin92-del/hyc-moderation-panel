@@ -312,6 +312,17 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
 // AKTUALNA taksonomia (lustro `ShelterType` w lib/core/models/shelter.dart —
 // kolejność = priorytet enuma). To jedyne kody, które wolno WYBRAĆ przy dodawaniu
 // i edycji; backend odrzuca resztę (whitelist w applyModeratorCreatePoint).
+//
+// ⛔ ETYKIETY MUSZĄ SIĘ ZGADZAĆ Z APKĄ. Ta lista jest CZWARTĄ kopią etykiet kategorii
+// (obok ShelterType.labelPl, name_canonical.BASE_LABEL i run_dedup.PLURAL_BASE w repo
+// hyc_do_budy). Rozjazd nie wywala niczego głośno — moderator po prostu widzi inną nazwę
+// kategorii niż user, i nikt się o tym nie dowiaduje.
+// To repo jest PRYWATNE i osobne, więc CI apki tej kopii NIE WIDZI (świadomie nie dajemy
+// jej PAT-a: wygasły token zamieniłby bramkę w cichy SKIP). Zamiast tego apka trzyma
+// śledzony zrzut `scripts/taksonomia_etykiety.json`, którego świeżości pilnuje
+// `scripts/check_etykiety_parytet.py` — każda zmiana etykiety jest tam GŁOŚNYM wierszem
+// w diffie, z przypomnieniem o tym pliku. Zmieniasz etykietę tutaj albo tam → zmieniasz
+// w OBU miejscach w tej samej robocie.
 const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   ["schronisko", "Schronisko"],
   ["nocleg", "Nocleg"],
@@ -324,7 +335,9 @@ const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   ["obserwacyjne", "Obserwacyjne"],
   ["schronienie_skalne", "Schronienie skalne"],
   ["opuszczone", "Opuszczony obiekt"],
-  ["miejsce_biwakowe", "Baza biwakowa"],
+  // [2026-08-19 user] „Baza biwakowa" → „Miejsce biwakowe" (parytet z apką,
+  // lib/core/models/shelter.dart). Kod taksonomii `miejsce_biwakowe` bez zmiany.
+  ["miejsce_biwakowe", "Miejsce biwakowe"],
   ["wiata", "Wiata"],
   ["schronienie", "Schronienie"],
   ["przystanek", "Wiata przystankowa"],
