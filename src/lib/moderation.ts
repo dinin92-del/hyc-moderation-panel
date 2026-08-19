@@ -62,7 +62,6 @@ export type DescriptionItem = {
   waterNearby: boolean;
   fireSpot: boolean;
   overnight: boolean;
-  emergencyShelter: boolean;
   /** Numer kontaktowy punktu — pole SERWEROWE, wpisywane tylko z panelu. */
   phone: string | null;
   /** `moderation-panel` dla punktów wpisanych ręcznie z panelu (podpis „Zespół Hyc!"). */
@@ -203,7 +202,6 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     waterNearby: !!d.waterNearby,
     fireSpot: !!d.fireSpot,
     overnight: !!d.overnight,
-    emergencyShelter: !!d.emergencyShelter,
     phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
     createdVia: d.createdVia ?? null,
     descriptionAuthorUid: d.descriptionAuthorUid ?? null,
@@ -475,7 +473,6 @@ export type PointEditFields = Partial<{
   waterNearby: boolean;
   fireSpot: boolean;
   overnight: boolean;
-  emergencyShelter: boolean;
   /** Numer kontaktowy; `null` czyści pole w dokumencie. */
   phone: string | null;
 }>;
@@ -501,7 +498,6 @@ export type PointCreateFields = {
   waterNearby?: boolean;
   fireSpot?: boolean;
   overnight?: boolean;
-  emergencyShelter?: boolean;
   /** Numer kontaktowy punktu (opcjonalny; walidacja po stronie callable). */
   phone?: string;
 };

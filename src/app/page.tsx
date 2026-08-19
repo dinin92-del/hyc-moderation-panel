@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, TriangleAlert, ChevronDown, ChevronRight, Check, EyeOff, Pencil, Plus, RotateCw } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, ChevronDown, ChevronRight, Check, EyeOff, Pencil, Plus, RotateCw } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { StateBadge, StatusBadge } from "@/components/state-badge";
@@ -358,7 +358,7 @@ const SHELTER_TYPE_LABEL: Record<string, string> = {
 };
 
 const POINT_ATTRS: Array<{
-  key: keyof Pick<DescriptionItem, "waterNearby" | "fireSpot" | "overnight" | "emergencyShelter">;
+  key: keyof Pick<DescriptionItem, "waterNearby" | "fireSpot" | "overnight">;
   label: string;
   Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   color: string;
@@ -366,10 +366,9 @@ const POINT_ATTRS: Array<{
   { key: "waterNearby",      label: "Woda",     Icon: Droplets,      color: "#008EE6" },
   { key: "fireSpot",         label: "Ognisko",  Icon: Flame,         color: "#D66000" },
   { key: "overnight",        label: "Nocleg",   Icon: Moon,          color: "#8A8070" },
-  { key: "emergencyShelter", label: "Awaryjne", Icon: TriangleAlert, color: "#BC8700" },
 ];
 
-function PointProps({ p }: { p: Pick<DescriptionItem, "type" | "waterNearby" | "fireSpot" | "overnight" | "emergencyShelter"> }) {
+function PointProps({ p }: { p: Pick<DescriptionItem, "type" | "waterNearby" | "fireSpot" | "overnight"> }) {
   const typeLabel = SHELTER_TYPE_LABEL[p.type] ?? p.type ?? "";
   const active = POINT_ATTRS.filter((a) => p[a.key]);
 
@@ -630,7 +629,6 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
   const [waterNearby, setWaterNearby] = useState(point.waterNearby);
   const [fireSpot, setFireSpot] = useState(point.fireSpot);
   const [overnight, setOvernight] = useState(point.overnight);
-  const [emergencyShelter, setEmergencyShelter] = useState(point.emergencyShelter);
   const [phone, setPhone] = useState(point.phone ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -654,9 +652,6 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
     if (waterNearby !== point.waterNearby) fields.waterNearby = waterNearby;
     if (fireSpot !== point.fireSpot) fields.fireSpot = fireSpot;
     if (overnight !== point.overnight) fields.overnight = overnight;
-    if (emergencyShelter !== point.emergencyShelter) {
-      fields.emergencyShelter = emergencyShelter;
-    }
     // Pusty input = czyszczenie numeru (null w dokumencie). Format waliduje
     // callable (sanitizePhone) — panel nie duplikuje reguł.
     if (phone.trim() !== (point.phone ?? "")) fields.phone = phone.trim() || null;
@@ -736,7 +731,6 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
         {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
         {flag("Miejsce na ogień", fireSpot, setFireSpot)}
         {flag("Nocleg", overnight, setOvernight)}
-        {flag("Schronienie awaryjne", emergencyShelter, setEmergencyShelter)}
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={submit} disabled={saving}>
@@ -811,7 +805,6 @@ function AddPointForm() {
   const [waterNearby, setWaterNearby] = useState(false);
   const [fireSpot, setFireSpot] = useState(false);
   const [overnight, setOvernight] = useState(false);
-  const [emergencyShelter, setEmergencyShelter] = useState(false);
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -847,7 +840,6 @@ function AddPointForm() {
       waterNearby,
       fireSpot,
       overnight,
-      emergencyShelter,
     };
     if (description.trim() !== "") fields.description = description.trim();
     if (phone.trim() !== "") fields.phone = phone.trim();
@@ -971,7 +963,6 @@ function AddPointForm() {
             {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
             {flag("Miejsce na ogień", fireSpot, setFireSpot)}
             {flag("Nocleg", overnight, setOvernight)}
-            {flag("Schronienie awaryjne", emergencyShelter, setEmergencyShelter)}
           </div>
 
           <div className="flex items-center gap-3">
