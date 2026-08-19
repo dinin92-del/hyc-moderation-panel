@@ -324,7 +324,9 @@ const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   ["obserwacyjne", "Obserwacyjne"],
   ["schronienie_skalne", "Schronienie skalne"],
   ["opuszczone", "Opuszczony obiekt"],
-  ["miejsce_biwakowe", "Baza biwakowa"],
+  // [2026-08-19 user] „Baza biwakowa" → „Miejsce biwakowe" (parytet z apką,
+  // lib/core/models/shelter.dart). Kod taksonomii `miejsce_biwakowe` bez zmiany.
+  ["miejsce_biwakowe", "Miejsce biwakowe"],
   ["wiata", "Wiata"],
   ["schronienie", "Schronienie"],
   ["przystanek", "Wiata przystankowa"],
