@@ -331,15 +331,22 @@ const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   ["stanica", "Stanica"],
   ["baza_namiotowa", "Baza namiotowa"],
   ["chatka", "Chatka"],
-  ["restauracja", "Gastronomia"],
+  ["restauracja", "Restauracja"],
   ["obserwacyjne", "Obserwacyjne"],
   ["schronienie_skalne", "Schronienie skalne"],
   ["opuszczone", "Opuszczony obiekt"],
   // [2026-08-19 user] „Baza biwakowa" → „Miejsce biwakowe" (parytet z apką,
   // lib/core/models/shelter.dart). Kod taksonomii `miejsce_biwakowe` bez zmiany.
   ["miejsce_biwakowe", "Miejsce biwakowe"],
+  // [2026-09-07] Grupa medyczna (parytet z ShelterType w lib/core/models/shelter.dart,
+  // priority 13/14/15) — cztery nowe, niezależne typy poza główną hierarchią schronień.
+  ["ratownictwo_gorskie", "Ratownictwo górskie"],
+  ["apteka", "Apteka"],
+  ["apteczka", "Apteczka"],
   ["wiata", "Wiata"],
   ["schronienie", "Schronienie"],
+  // Grupa medyczna, dokończenie (priority 18 — wolny slot po `pasnik`, patrz shelter.dart).
+  ["defibrylator", "Defibrylator (AED)"],
   ["przystanek", "Wiata przystankowa"],
   ["nieznane", "Typ nieznany"],
 ];
