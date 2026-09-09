@@ -342,7 +342,7 @@ const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   // priority 13/14/15) — cztery nowe, niezależne typy poza główną hierarchią schronień.
   ["ratownictwo_gorskie", "Ratownictwo górskie"],
   ["apteka", "Apteka"],
-  ["apteczka", "Apteczka"],
+  ["apteczka", "Apteczka na szlaku"],
   ["wiata", "Wiata"],
   ["schronienie", "Schronienie"],
   // Grupa medyczna, dokończenie (priority 18 — wolny slot po `pasnik`, patrz shelter.dart).
