@@ -326,14 +326,16 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
 const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   ["schronisko", "Schronisko"],
   ["nocleg", "Nocleg"],
-  ["bacowka", "Bacówka"],
   ["sklep", "Sklep"],
   ["stanica", "Stanica"],
   ["baza_namiotowa", "Baza namiotowa"],
-  ["chatka", "Chatka"],
   ["restauracja", "Restauracja"],
   ["obserwacyjne", "Obserwacyjne"],
   ["schronienie_skalne", "Schronienie skalne"],
+  // [2026-09-23 user] „Schron" zastępuje wycofane chatka/bacowka — otwarty,
+  // bezobsługowy schron turystyczny (parytet ShelterType.schron w apce,
+  // lib/core/models/shelter.dart; ikona = bacowka_outline.svg).
+  ["schron", "Schron"],
   ["opuszczone", "Opuszczony obiekt"],
   // [2026-08-19 user] „Baza biwakowa" → „Miejsce biwakowe" (parytet z apką,
   // lib/core/models/shelter.dart). Kod taksonomii `miejsce_biwakowe` bez zmiany.
@@ -357,6 +359,11 @@ const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
 const SHELTER_TYPE_LABEL: Record<string, string> = {
   ...Object.fromEntries(TAXONOMY_OPTIONS),
   dom_turysty: "Nocleg",
+  // [2026-09-23] chatka/bacowka wycofane (rozbite na schron/nocleg/wiata/…).
+  // Etykieta = ta sama, którą apka trzyma w enumie dla starych nakładek Firestore,
+  // więc moderator widzi na legacy-punkcie to samo co user. Niepickowalne.
+  chatka: "Chatka",
+  bacowka: "Bacówka",
   parking_zadaszony: "Zadaszony parking (wycofane)",
   wiata_rowerowa: "Wiata rowerowa (wycofane)",
   altana: "Altana (wycofane)",
