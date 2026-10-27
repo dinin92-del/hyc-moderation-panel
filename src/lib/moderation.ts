@@ -164,6 +164,8 @@ export type LogItem = {
   isTest: boolean;
 };
 
+// Tylko id/uid (nadawane przez system). Nigdy authorName: to wyświetlana nazwa wybierana przez usera,
+// więc „SMOKE…” w nazwie ukryłoby prawdziwe wpisy przed moderatorem przy „Ukryj testowe”.
 function isSmokeId(...ids: (string | null | undefined)[]): boolean {
   return ids.some((id) => typeof id === "string" && id.startsWith("SMOKE"));
 }
@@ -180,7 +182,7 @@ function mapComment(d: DocumentData, id: string, pointId: string): CommentItem {
     labels: Array.isArray(d.moderation?.labels) ? d.moderation.labels : [],
     reportCount: d.reportCount ?? 0,
     createdAt: millis(d.createdAt),
-    isTest: !!d._test || isSmokeId(pointId, id, d.authorUid, d.authorName),
+    isTest: !!d._test || isSmokeId(pointId, id, d.authorUid),
   };
 }
 
@@ -195,7 +197,7 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     authorName: d.authorName ?? "",
     authorUid: d.authorUid ?? "",
     createdAt: millis(d.createdAt),
-    isTest: !!d._test || isSmokeId(id, d.authorUid, d.authorName),
+    isTest: !!d._test || isSmokeId(id, d.authorUid),
     lat: typeof d.lat === "number" ? d.lat : null,
     lon: typeof d.lon === "number" ? d.lon : null,
     type: d.type ?? "",
