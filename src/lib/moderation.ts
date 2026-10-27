@@ -251,6 +251,92 @@ const byNewest = (a: { createdAt: number | null }, b: { createdAt: number | null
 const byNewestDescription = (a: DescriptionItem, b: DescriptionItem) =>
   (descriptionDate(b) ?? -Infinity) - (descriptionDate(a) ?? -Infinity);
 
+// ── Autor z odwrotnego indeksu (plan autor-prywatny-nick-1027) ──────────────
+// Publiczne `authorUid` bywa wyczyszczone. Prawdę trzyma `contributionAuthors/
+// {klucz}` ({uid, kind, path}; czyta moderator, pisze serwer), klucz jak w
+// functions/author_index.js: `comment__pid__cid`, `point__pid`, `description__pid`,
+// `photo__id`. Pole publiczne ma pierwszeństwo, indeks tylko dopełnia.
+const AUTHOR_MISS_TTL_MS = 60_000;
+const authorCache = new Map<string, { uid: string; at: number }>();
+
+async function lookupAuthorUid(key: string): Promise<string> {
+  const hit = authorCache.get(key);
+  // Trafienie żyje do końca sesji. Brak wpisu krótko, bo indeks powstaje chwilę
+  // po treści (trigger), więc zbyt długi cache pustego wyniku ukryłby autora.
+  if (hit && (hit.uid !== "" || Date.now() - hit.at < AUTHOR_MISS_TTL_MS)) return hit.uid;
+  try {
+    const snap = await getDoc(doc(db, "contributionAuthors", key));
+    const uid = snap.exists() && typeof snap.data()?.uid === "string" ? snap.data()!.uid : "";
+    authorCache.set(key, { uid, at: Date.now() });
+    return uid;
+  } catch {
+    return "";
+  }
+}
+
+/** Uzupełnia `authorUid` komentarzy z indeksu, gdy pole publiczne jest puste. */
+export async function fillCommentAuthors(items: CommentItem[]): Promise<CommentItem[]> {
+  return Promise.all(
+    items.map(async (c) => {
+      if (c.authorUid) return c;
+      const authorUid = await lookupAuthorUid(`comment__${c.pointId}__${c.commentId}`);
+      return authorUid ? { ...c, authorUid } : c;
+    }),
+  );
+}
+
+/**
+ * Uzupełnia autora punktu i autora opisu. Punkty z panelu (`createdVia`) nie
+ * mają autora z założenia, więc ich nie odpytujemy. Autora opisu szukamy tylko
+ * wtedy, gdy opis jest, a pola brak.
+ */
+export async function fillDescriptionAuthors(
+  items: DescriptionItem[],
+): Promise<DescriptionItem[]> {
+  return Promise.all(
+    items.map(async (p) => {
+      if (p.createdVia === "moderation-panel") return p;
+      const authorUid = p.authorUid || (await lookupAuthorUid(`point__${p.pointId}`));
+      const descriptionAuthorUid =
+        p.descriptionAuthorUid ||
+        (p.description.length > 0 ? (await lookupAuthorUid(`description__${p.pointId}`)) || null : null);
+      if (authorUid === p.authorUid && descriptionAuthorUid === p.descriptionAuthorUid) return p;
+      return { ...p, authorUid, descriptionAuthorUid };
+    }),
+  );
+}
+
+/** Uzupełnia `authorUid` zdjęć z indeksu, gdy pole publiczne jest puste. */
+export async function fillPhotoAuthors(items: PhotoItem[]): Promise<PhotoItem[]> {
+  return Promise.all(
+    items.map(async (f) => {
+      if (f.authorUid) return f;
+      const authorUid = await lookupAuthorUid(`photo__${f.id}`);
+      return authorUid ? { ...f, authorUid } : f;
+    }),
+  );
+}
+
+/**
+ * Watcher: najpierw oddaje listę od razu (bez czekania na indeks), potem tę samą
+ * z uzupełnionymi autorami. Numer wydania pilnuje, żeby spóźnione uzupełnienie
+ * starej migawki nie nadpisało nowszej.
+ */
+function emitThenFill<T>(
+  items: T[],
+  fill: (x: T[]) => Promise<T[]>,
+  cb: (items: T[]) => void,
+  gen: { n: number },
+) {
+  const mine = ++gen.n;
+  cb(items);
+  void fill(items)
+    .then((filled) => {
+      if (mine === gen.n && filled.some((f, i) => f !== items[i])) cb(filled);
+    })
+    .catch(() => {});
+}
+
 /** Komentarze needs_review (collectionGroup) — live. */
 export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e: unknown) => void) {
   const q = query(
@@ -258,6 +344,7 @@ export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e
     where("moderation.state", "==", "needs_review"),
     limit(QUEUE_LIMIT),
   );
+  const gen = { n: 0 };
   return onSnapshot(
     q,
     (snap: QuerySnapshot) => {
@@ -265,7 +352,7 @@ export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e
         mapComment(d.data(), d.id, d.ref.parent.parent?.id ?? ""),
       );
       out.sort(byNewest);
-      cb(out);
+      emitThenFill(out, fillCommentAuthors, cb, gen);
     },
     onErr,
   );
@@ -278,6 +365,7 @@ export function watchDescriptionsQueue(cb: (items: DescriptionItem[]) => void, o
     where("moderation.state", "==", "needs_review"),
     limit(QUEUE_LIMIT),
   );
+  const gen = { n: 0 };
   return onSnapshot(
     q,
     (snap) => {
@@ -285,7 +373,7 @@ export function watchDescriptionsQueue(cb: (items: DescriptionItem[]) => void, o
         .map((d) => mapDescription(d.data(), d.id))
         .filter((p) => p.description.length > 0);
       out.sort(byNewestDescription);
-      cb(out);
+      emitThenFill(out, fillDescriptionAuthors, cb, gen);
     },
     onErr,
   );
@@ -310,7 +398,7 @@ export async function fetchAllComments(take: number = BROWSE_LIMIT): Promise<Com
   const snap = await getDocs(query(collectionGroup(db, "comments"), limit(take)));
   const out = snap.docs.map((d) => mapComment(d.data(), d.id, d.ref.parent.parent?.id ?? ""));
   out.sort(byNewest);
-  return out;
+  return fillCommentAuthors(out);
 }
 
 /**
@@ -349,9 +437,13 @@ export async function fetchContentPoints(
   // ⛔ NIE `byNewest` — to zdejmowało `orderBy("descriptionAddedAt","desc")` z
   // zapytania wyżej i przestawiało listę z powrotem na daty punktów.
   described.sort(byNewestDescription);
+  const [newFilled, describedFilled] = await Promise.all([
+    fillDescriptionAuthors(newPoints),
+    fillDescriptionAuthors(described),
+  ]);
   return {
-    newPoints,
-    described,
+    newPoints: newFilled,
+    described: describedFilled,
     truncated: ugcSnap.size >= take || descSnap.size >= take,
   };
 }
@@ -390,7 +482,7 @@ export async function fetchPointsByIds(ids: string[]): Promise<DescriptionItem[]
     const data = s?.data();
     if (data) out.push(mapDescription(data, s!.id));
   }
-  return out;
+  return fillDescriptionAuthors(out);
 }
 
 /** Wszystkie zgłoszenia (otwarte i zamknięte), najnowsze pierwsze. */
@@ -553,13 +645,17 @@ export function watchBlockedUsers(cb: (items: BlockedItem[]) => void, onErr: (e:
 /** Komentarz po ścieżce points/{pointId}/comments/{commentId} (podgląd w zgłoszeniu). */
 export async function fetchCommentById(pointId: string, commentId: string): Promise<CommentItem | null> {
   const snap = await getDoc(doc(db, "points", pointId, "comments", commentId));
-  return snap.exists() ? mapComment(snap.data(), snap.id, pointId) : null;
+  if (!snap.exists()) return null;
+  const [filled] = await fillCommentAuthors([mapComment(snap.data(), snap.id, pointId)]);
+  return filled;
 }
 
 /** Opis punktu po points/{pointId} (podgląd w zgłoszeniu). */
 export async function fetchDescriptionById(pointId: string): Promise<DescriptionItem | null> {
   const snap = await getDoc(doc(db, "points", pointId));
-  return snap.exists() ? mapDescription(snap.data(), snap.id) : null;
+  if (!snap.exists()) return null;
+  const [filled] = await fillDescriptionAuthors([mapDescription(snap.data(), snap.id)]);
+  return filled;
 }
 
 // ── Zdjęcia punktu (photos/{id}) — wątek zdjęć 0818 ──────────────────────────
@@ -617,7 +713,7 @@ export async function fetchPhotosForPoint(pointId: string): Promise<PhotoItem[]>
   );
   const out = snap.docs.map((d) => mapPhoto(d.data(), d.id));
   out.sort(byNewest);
-  return out;
+  return fillPhotoAuthors(out);
 }
 
 /** Zdejmuje zdjęcie ręką moderatora (photoModeratorDelete, status→removed). */
