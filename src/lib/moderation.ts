@@ -36,6 +36,12 @@ export type CommentItem = {
   commentId: string;
   authorName: string;
   authorUid: string;
+  /**
+   * Pole `authorUid` NIEOBECNE w dokumencie: serwer je wyczyścił, autora zna
+   * tylko `contributionAuthors`. `null` w polu (zespół, konto skasowane) to
+   * NIE jest wyczyszczenie, więc indeksu nie pytamy. Patrz [authorFieldCleared].
+   */
+  authorCleared: boolean;
   text: string;
   status: string;
   state: ModState;
@@ -54,6 +60,8 @@ export type DescriptionItem = {
   labels: string[];
   authorName: string;
   authorUid: string;
+  /** Jak [CommentItem.authorCleared], dla `authorUid` punktu. */
+  authorCleared: boolean;
   createdAt: number | null;
   isTest: boolean;
   lat: number | null;
@@ -73,6 +81,11 @@ export type DescriptionItem = {
    * atrybucję rozstrzyga [descriptionContributor].
    */
   descriptionAuthorUid: string | null;
+  /**
+   * `descriptionAuthorUid` NIEOBECNE (wyczyszczone przez serwer albo dokument
+   * sprzed #615). `null` w polu = opis zespołu (przejęty w panelu), bez autora.
+   */
+  descriptionAuthorCleared: boolean;
   descriptionAuthorName: string | null;
   descriptionAddedAt: number | null;
 };
@@ -164,6 +177,18 @@ export type LogItem = {
   isTest: boolean;
 };
 
+/**
+ * Trzy stany pola autora, lustro `authorFieldState` w functions/author_index.js
+ * (repo aplikacji): string = autor w polu, brak pola = wyczyszczone (autor
+ * w `contributionAuthors`), `null` = autora nie ma (punkt zespołowy, opis
+ * przejęty przez zespół, konto skasowane). Tylko brak pola uprawnia do
+ * odpytania indeksu: przy `null` indeks może jeszcze pamiętać dawnego autora,
+ * a za tym wierszem stoi „Zablokuj autora".
+ */
+function authorFieldCleared(d: DocumentData, field: string): boolean {
+  return !(field in d) || d[field] === undefined;
+}
+
 // Tylko id/uid (nadawane przez system). Nigdy authorName: to wyświetlana nazwa wybierana przez usera,
 // więc „SMOKE…” w nazwie ukryłoby prawdziwe wpisy przed moderatorem przy „Ukryj testowe”.
 function isSmokeId(...ids: (string | null | undefined)[]): boolean {
@@ -175,7 +200,8 @@ function mapComment(d: DocumentData, id: string, pointId: string): CommentItem {
     pointId,
     commentId: id,
     authorName: d.authorName ?? "",
-    authorUid: d.authorUid ?? "",
+    authorUid: typeof d.authorUid === "string" ? d.authorUid : "",
+    authorCleared: authorFieldCleared(d, "authorUid"),
     text: d.text ?? "",
     status: d.status ?? "active",
     state: (d.moderation?.state ?? "approved") as ModState,
@@ -195,7 +221,8 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     state: (d.moderation?.state ?? "approved") as ModState,
     labels: Array.isArray(d.moderation?.labels) ? d.moderation.labels : [],
     authorName: d.authorName ?? "",
-    authorUid: d.authorUid ?? "",
+    authorUid: typeof d.authorUid === "string" ? d.authorUid : "",
+    authorCleared: authorFieldCleared(d, "authorUid"),
     createdAt: millis(d.createdAt),
     isTest: !!d._test || isSmokeId(id, d.authorUid),
     lat: typeof d.lat === "number" ? d.lat : null,
@@ -206,7 +233,9 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     overnight: !!d.overnight,
     phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
     createdVia: d.createdVia ?? null,
-    descriptionAuthorUid: d.descriptionAuthorUid ?? null,
+    descriptionAuthorUid: typeof d.descriptionAuthorUid === "string" &&
+      d.descriptionAuthorUid !== "" ? d.descriptionAuthorUid : null,
+    descriptionAuthorCleared: authorFieldCleared(d, "descriptionAuthorUid"),
     descriptionAuthorName: d.descriptionAuthorName ?? null,
     descriptionAddedAt: millis(d.descriptionAddedAt),
   };
@@ -257,7 +286,8 @@ const byNewestDescription = (a: DescriptionItem, b: DescriptionItem) =>
 // Publiczne `authorUid` bywa wyczyszczone. Prawdę trzyma `contributionAuthors/
 // {klucz}` ({uid, kind, path}; czyta moderator, pisze serwer), klucz jak w
 // functions/author_index.js: `comment__pid__cid`, `point__pid`, `description__pid`,
-// `photo__id`. Pole publiczne ma pierwszeństwo, indeks tylko dopełnia.
+// `photo__id`. Pole publiczne ma pierwszeństwo, indeks tylko dopełnia, i to
+// wyłącznie dla pola NIEOBECNEGO (`authorCleared`), nigdy dla `null`.
 const AUTHOR_MISS_TTL_MS = 60_000;
 const authorCache = new Map<string, { uid: string; at: number }>();
 
@@ -276,11 +306,11 @@ async function lookupAuthorUid(key: string): Promise<string> {
   }
 }
 
-/** Uzupełnia `authorUid` komentarzy z indeksu, gdy pole publiczne jest puste. */
+/** Uzupełnia `authorUid` komentarzy z indeksu, gdy pole publiczne wyczyszczono. */
 export async function fillCommentAuthors(items: CommentItem[]): Promise<CommentItem[]> {
   return Promise.all(
     items.map(async (c) => {
-      if (c.authorUid) return c;
+      if (c.authorUid || !c.authorCleared) return c;
       const authorUid = await lookupAuthorUid(`comment__${c.pointId}__${c.commentId}`);
       return authorUid ? { ...c, authorUid } : c;
     }),
@@ -298,21 +328,23 @@ export async function fillDescriptionAuthors(
   return Promise.all(
     items.map(async (p) => {
       if (p.createdVia === "moderation-panel") return p;
-      const authorUid = p.authorUid || (await lookupAuthorUid(`point__${p.pointId}`));
+      const authorUid = p.authorUid ||
+        (p.authorCleared ? await lookupAuthorUid(`point__${p.pointId}`) : "");
       const descriptionAuthorUid =
         p.descriptionAuthorUid ||
-        (p.description.length > 0 ? (await lookupAuthorUid(`description__${p.pointId}`)) || null : null);
+        (p.description.length > 0 && p.descriptionAuthorCleared ?
+          (await lookupAuthorUid(`description__${p.pointId}`)) || null : null);
       if (authorUid === p.authorUid && descriptionAuthorUid === p.descriptionAuthorUid) return p;
       return { ...p, authorUid, descriptionAuthorUid };
     }),
   );
 }
 
-/** Uzupełnia `authorUid` zdjęć z indeksu, gdy pole publiczne jest puste. */
+/** Uzupełnia `authorUid` zdjęć z indeksu, gdy pole publiczne wyczyszczono. */
 export async function fillPhotoAuthors(items: PhotoItem[]): Promise<PhotoItem[]> {
   return Promise.all(
     items.map(async (f) => {
-      if (f.authorUid) return f;
+      if (f.authorUid || !f.authorCleared) return f;
       const authorUid = await lookupAuthorUid(`photo__${f.id}`);
       return authorUid ? { ...f, authorUid } : f;
     }),
@@ -668,6 +700,8 @@ export type PhotoItem = {
   id: string;
   pointId: string | null;
   authorUid: string;
+  /** Jak [CommentItem.authorCleared]. */
+  authorCleared: boolean;
   authorName: string;
   /** `pending` | `visible` | `removed` */
   status: string;
@@ -688,7 +722,8 @@ function mapPhoto(d: DocumentData, id: string): PhotoItem {
   return {
     id,
     pointId: typeof d.pointId === "string" ? d.pointId : null,
-    authorUid: d.authorUid ?? "",
+    authorUid: typeof d.authorUid === "string" ? d.authorUid : "",
+    authorCleared: authorFieldCleared(d, "authorUid"),
     // Nazwa leci m.in. do window.confirm — znaki sterujące/nowe linie mogłyby
     // rozłamać treść dialogu, normalizujemy do pojedynczych spacji.
     authorName: typeof d.authorName === "string"
