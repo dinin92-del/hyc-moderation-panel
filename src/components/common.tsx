@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreHorizontal, ExternalLink, Droplets, Flame, Moon, Check, EyeOff } from "lucide-react";
+import { MoreHorizontal, ExternalLink, Check, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,39 +11,48 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { QUEUE_LIMIT, type DescriptionItem } from "@/lib/moderation";
+import { QUEUE_LIMIT, type DescriptionItem, type PointOrigin } from "@/lib/moderation";
 import { aiLabel } from "@/lib/labels";
 import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
 import { actBlock, actUnblock } from "@/lib/actions";
 
-export const POINT_ATTRS: Array<{
-  key: keyof Pick<DescriptionItem, "waterNearby" | "fireSpot" | "overnight">;
-  label: string;
-  Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
-  color: string;
-}> = [
-  { key: "waterNearby",      label: "Woda",     Icon: Droplets,      color: "#008EE6" },
-  { key: "fireSpot",         label: "Ognisko",  Icon: Flame,         color: "#D66000" },
-  { key: "overnight",        label: "Nocleg",   Icon: Moon,          color: "#8A8070" },
-];
+const ORIGIN_TONE: Record<PointOrigin, string> = {
+  asset: "border-border bg-muted text-muted-foreground",
+  overlay: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300",
+  ugc: "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300",
+};
 
-export function PointProps({ p }: { p: Pick<DescriptionItem, "type" | "waterNearby" | "fireSpot" | "overnight"> }) {
+// Pochodzenie decyduje o tym, co moderator może zrobić: punkt z bazy nie zmieni
+// pozycji, a usunięcie punktu spoza bazy jest ostateczne.
+export function OriginBadge({ origin, createdVia }: { origin: PointOrigin; createdVia?: string | null }) {
+  const label = origin === "asset"
+    ? "Z bazy"
+    : origin === "overlay"
+      ? "Poprawiony"
+      : createdVia === "moderation-panel" ? "Dodany w panelu" : "Od użytkownika";
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${ORIGIN_TONE[origin]}`}>
+      {label}
+    </span>
+  );
+}
+
+export function SuppressedBadge() {
+  return (
+    <span className="inline-flex items-center rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+      Usunięty z mapy
+    </span>
+  );
+}
+
+export function PointProps({ p }: { p: Pick<DescriptionItem, "type"> }) {
   const typeLabel = SHELTER_TYPE_LABEL[p.type] ?? p.type ?? "";
-  const active = POINT_ATTRS.filter((a) => p[a.key]);
-
-  if (!typeLabel && active.length === 0) return null;
+  if (!typeLabel) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
-      {typeLabel && (
-        <span className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {typeLabel}
-        </span>
-      )}
-      {active.map(({ key, label, Icon, color }) => (
-        <span key={key} title={label} className="inline-flex items-center">
-          <Icon className="h-3.5 w-3.5" style={{ color, fill: color, strokeWidth: 0 }} />
-        </span>
-      ))}
+      <span className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+        {typeLabel}
+      </span>
     </div>
   );
 }
@@ -56,7 +65,7 @@ export function TestBadge() {
   );
 }
 
-// Etykiety werdyktu AI (moderation.labels[]) — czemu item trafił do needs_review.
+// Etykiety werdyktu filtra (moderation.labels[]) — czemu item trafił do kolejki.
 export function LabelChips({ labels }: { labels: string[] }) {
   if (!labels || labels.length === 0) return null;
   return (
@@ -66,7 +75,7 @@ export function LabelChips({ labels }: { labels: string[] }) {
           key={l}
           className="inline-flex items-center rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700"
         >
-          AI: {aiLabel(l)}
+          {aiLabel(l)}
         </span>
       ))}
     </div>

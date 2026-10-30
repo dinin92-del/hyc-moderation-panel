@@ -33,12 +33,13 @@ export const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   // priority 13/14/15) — cztery nowe, niezależne typy poza główną hierarchią schronień.
   ["ratownictwo_gorskie", "Ratownictwo górskie"],
   ["apteka", "Apteka"],
-  ["apteczka", "Apteczka na szlaku"],
+  ["apteczka", "Apteczka"],
   ["wiata", "Wiata"],
   ["schronienie", "Schronienie"],
-  // Grupa medyczna, dokończenie (priority 18 — wolny slot po `pasnik`, patrz shelter.dart).
-  ["defibrylator", "Defibrylator (AED)"],
   ["przystanek", "Wiata przystankowa"],
+  ["woda_pitna", "Woda pitna"],
+  ["woda_do_przegotowania", "Woda do przegotowania"],
+  ["woda_niepotwierdzona", "Woda niepotwierdzona"],
   ["nieznane", "Typ nieznany"],
 ];
 
@@ -53,6 +54,8 @@ export const SHELTER_TYPE_LABEL: Record<string, string> = {
   // więc moderator widzi na legacy-punkcie to samo co user. Niepickowalne.
   chatka: "Chatka",
   bacowka: "Bacówka",
+  // [2026-09-11 user] Zdjęty z wyboru w apce, serwer też go nie przyjmuje.
+  defibrylator: "Defibrylator (AED)",
   parking_zadaszony: "Zadaszony parking (wycofane)",
   wiata_rowerowa: "Wiata rowerowa (wycofane)",
   altana: "Altana (wycofane)",

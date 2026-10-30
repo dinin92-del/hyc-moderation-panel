@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, ChevronDown, ChevronRight, EyeOff, Pencil } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronRight, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -18,7 +17,6 @@ import {
   Empty,
   KebabMenu,
   LabelChips,
-  PointProps,
   PublishHideButtons,
   QueueError,
   Section,
@@ -26,24 +24,58 @@ import {
   blockActions,
   type KebabAction,
 } from "@/components/common";
-import { PointEditDialog } from "@/components/point-forms";
-import { PointPhotos } from "@/components/point-photos";
+import { usePointCard } from "@/components/point-card-context";
+import { PendingPhotos } from "@/components/point-photos";
 import {
   descriptionContributor,
   descriptionDate,
   fetchCommentById,
   fetchDescriptionById,
+  fetchPointBase,
   type CommentItem,
   type DescriptionItem,
+  type PointBase,
   type ReportItem,
 } from "@/lib/moderation";
-import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, fmtDate } from "@/lib/labels";
+import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, fmtAge, fmtDate } from "@/lib/labels";
+import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
 import { mapLink } from "@/lib/coords";
-import { act, actDeletePoint, confirmHide } from "@/lib/actions";
+import {
+  act,
+  actDeletePoint,
+  actDismissReports,
+  actHide,
+  closeTargetReports,
+} from "@/lib/actions";
+
+// Nazwa punktu zamiast samego id i wejście na kartę. Dotyczy też punktu bez dokumentu.
+function PointLink({ pointId, name }: { pointId: string; name?: string }) {
+  const { openCard } = usePointCard();
+  const [loaded, setLoaded] = useState<string | null>(null);
+  useEffect(() => {
+    if (name) return;
+    let alive = true;
+    fetchDescriptionById(pointId)
+      .then((p) => alive && setLoaded(p ? p.name || SHELTER_TYPE_LABEL[p.type] || "Punkt bez nazwy" : "Punkt usunięty"))
+      .catch(() => alive && setLoaded("Nie udało się wczytać punktu"));
+    return () => { alive = false; };
+  }, [pointId, name]);
+  return (
+    <button
+      type="button"
+      className="break-words text-left font-medium underline-offset-2 hover:underline"
+      title={pointId}
+      onClick={() => openCard(pointId)}
+    >
+      {name || loaded || "Ładowanie…"}
+    </button>
+  );
+}
 
 export function QueueComments({ items, error, hideTest }: { items: CommentItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((c) => !c.isTest) : items;
   const { uids: blocked } = useBlocked();
+  const { openCard } = usePointCard();
   return (
     <Section title="Komentarze do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
@@ -54,7 +86,7 @@ export function QueueComments({ items, error, hideTest }: { items: CommentItem[]
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-40">Autor / Punkt</TableHead>
+              <TableHead className="w-48">Autor / Punkt</TableHead>
               <TableHead>Treść</TableHead>
               <TableHead className="w-20">Zgłosz.</TableHead>
               <TableHead className="w-28">Data</TableHead>
@@ -67,7 +99,7 @@ export function QueueComments({ items, error, hideTest }: { items: CommentItem[]
                 <TableCell className="align-top text-sm">
                   <div className="flex flex-col gap-1">
                     <span className="break-words">{c.authorName || "Użytkownik"}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground">{c.pointId}</span>
+                    <PointLink pointId={c.pointId} />
                     {c.isTest && <TestBadge />}
                     <LabelChips labels={c.labels} />
                   </div>
@@ -78,19 +110,19 @@ export function QueueComments({ items, error, hideTest }: { items: CommentItem[]
                     : <p className="italic text-muted-foreground">[brak treści]</p>}
                 </TableCell>
                 <TableCell className="align-top">
-                  {c.reportCount > 0 ? <Badge variant="destructive">{c.reportCount}</Badge> : "—"}
+                  {c.reportCount > 0 ? c.reportCount : "—"}
                 </TableCell>
                 <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(c.createdAt)}</TableCell>
                 <TableCell className="align-top text-right">
                   <div className="flex items-center justify-end gap-1">
                     <PublishHideButtons
                       onPublish={() => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Opublikowano")}
-                      onHide={() =>
-                        confirmHide("komentarz") &&
-                        act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto")
-                      }
+                      onHide={() => actHide({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "komentarz", "Ukryto")}
                     />
-                    <KebabMenu actions={blockActions(c.authorUid, c.authorName, blocked)} />
+                    <KebabMenu actions={[
+                      { label: "Karta punktu", onClick: () => openCard(c.pointId) },
+                      ...blockActions(c.authorUid, c.authorName, blocked),
+                    ]} />
                   </div>
                 </TableCell>
               </TableRow>
@@ -102,12 +134,35 @@ export function QueueComments({ items, error, hideTest }: { items: CommentItem[]
   );
 }
 
+// Co się zmieniło względem bazy. Bez tego moderator zatwierdza nazwę i typ, nie
+// widząc, że użytkownik właśnie je podmienił.
+function BaseDiff({ p }: { p: DescriptionItem }) {
+  const [base, setBase] = useState<PointBase | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchPointBase(p.pointId).then((b) => alive && setBase(b)).catch(() => {});
+    return () => { alive = false; };
+  }, [p.pointId]);
+  const rows: string[] = [];
+  if (base && p.name && p.name !== base.name) rows.push(`Nazwa w bazie: ${base.name}`);
+  if (base && p.type && p.type !== base.type) {
+    rows.push(`Kategoria w bazie: ${SHELTER_TYPE_LABEL[base.type] ?? base.type}`);
+  }
+  if (p.phonePending) rows.push(`Nowy telefon czeka: ${p.phonePending}`);
+  if (rows.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs text-amber-700 dark:text-amber-400">
+      {rows.map((r) => <li key={r}>{r}</li>)}
+    </ul>
+  );
+}
+
 export function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((p) => !p.isTest) : items;
-  const [editingId, setEditingId] = useState<string | null>(null);
   const { uids: blocked } = useBlocked();
+  const { openCard, openEdit } = usePointCard();
   return (
-    <Section title="Opisy do sprawdzenia" count={visible.length} truncated={items.length}>
+    <Section title="Opisy i uzupełnienia do sprawdzenia" count={visible.length} truncated={items.length}>
       {error ? (
         <QueueError message={error} />
       ) : visible.length === 0 ? (
@@ -116,101 +171,136 @@ export function QueueDescriptions({ items, error, hideTest }: { items: Descripti
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-44">Punkt</TableHead>
-              <TableHead>Opis</TableHead>
+              <TableHead className="w-52">Punkt</TableHead>
+              <TableHead>Treść</TableHead>
               <TableHead className="w-28">Data</TableHead>
               <TableHead className="w-60 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {visible.map((p) => (
-              <TableRow key={p.pointId}>
-                <TableCell className="align-top text-sm font-medium">
-                  <span className="break-words">{p.name || p.pointId}</span>
-                  <PointProps p={p} />
-                  <LabelChips labels={p.labels} />
-                  {p.isTest && <div className="mt-1"><TestBadge /></div>}
-                </TableCell>
-                <TableCell className="align-top text-sm">
-                  <p className="whitespace-pre-wrap break-words">{p.description}</p>
-                </TableCell>
-                <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(descriptionDate(p))}</TableCell>
-                <TableCell className="align-top text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <PublishHideButtons
-                      onPublish={() => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano")}
-                      onHide={() =>
-                        confirmHide("opis") && act({ action: "rejectDescription", pointId: p.pointId }, "Ukryto")
-                      }
-                    />
-                    <KebabMenu
-                      actions={[
-                        {
-                          label: "Edytuj punkt",
-                          onClick: () => setEditingId(p.pointId),
-                        },
-                        // Kolejka opisów moderuje OPIS, więc blokada celuje w jego
-                        // autora (#615), nie w twórcę punktu. Przy nieznanej
-                        // atrybucji `descriptionContributor` zwraca null / uid null
-                        // — wtedy akcji NIE MA w ogóle, żeby nie zablokować
-                        // niewinnego twórcy punktu za cudzy opis.
-                        ...(() => {
-                          const a = descriptionContributor(p);
-                          if (!a?.uid) return [];
-                          // Doprecyzowanie „opisu" tylko wtedy, gdy w wierszu są DWIE
-                          // osoby — inaczej etykieta sugerowałaby drugiego autora tam,
-                          // gdzie jest jeden.
-                          const label = a.uid === p.authorUid ? undefined : `Zablokuj autora opisu (${a.name})`;
-                          return blockActions(a.uid, a.name, blocked, undefined, label);
-                        })(),
-                        {
-                          label: "Usuń punkt",
-                          variant: "destructive",
-                          onClick: () => actDeletePoint(p.pointId, p.name),
-                        },
-                        ...(mapLink(p.lat, p.lon)
-                          ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
-                          : []),
-                      ]}
-                    />
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+            {visible.map((p) => {
+              const autor = descriptionContributor(p);
+              return (
+                <TableRow key={p.pointId}>
+                  <TableCell className="align-top text-sm">
+                    <PointLink pointId={p.pointId} name={p.name || undefined} />
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <StateBadge state={p.state} />
+                      {p.isTest && <TestBadge />}
+                    </div>
+                    <LabelChips labels={p.labels} />
+                    {autor && <div className="mt-1 text-xs text-muted-foreground">{autor.name}</div>}
+                  </TableCell>
+                  <TableCell className="align-top text-sm">
+                    {p.description
+                      ? <p className="whitespace-pre-wrap break-words">{p.description}</p>
+                      : <p className="italic text-muted-foreground">Bez opisu.</p>}
+                    <BaseDiff p={p} />
+                    <PendingPhotos pointId={p.pointId} />
+                  </TableCell>
+                  <TableCell className="align-top font-mono text-xs text-muted-foreground">{fmtDate(descriptionDate(p) ?? p.createdAt)}</TableCell>
+                  <TableCell className="align-top text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <PublishHideButtons
+                        onPublish={() => act({ action: "approveDescription", pointId: p.pointId }, "Opublikowano")}
+                        onHide={() => actHide({ action: "rejectDescription", pointId: p.pointId }, "opis", "Ukryto")}
+                      />
+                      <KebabMenu
+                        actions={[
+                          { label: "Karta punktu", onClick: () => openCard(p.pointId) },
+                          { label: "Edytuj punkt", onClick: () => openEdit(p.pointId) },
+                          // Kolejka opisów moderuje OPIS, więc blokada celuje w jego
+                          // autora (#615), nie w twórcę punktu. Przy nieznanej
+                          // atrybucji `descriptionContributor` zwraca null / uid null
+                          // — wtedy akcji NIE MA w ogóle, żeby nie zablokować
+                          // niewinnego twórcy punktu za cudzy opis.
+                          ...(() => {
+                            if (!autor?.uid) return [];
+                            // Doprecyzowanie „opisu" tylko wtedy, gdy w wierszu są DWIE
+                            // osoby — inaczej etykieta sugerowałaby drugiego autora tam,
+                            // gdzie jest jeden.
+                            const label = autor.uid === p.authorUid ? undefined : `Zablokuj autora opisu (${autor.name})`;
+                            return blockActions(autor.uid, autor.name, blocked, undefined, label);
+                          })(),
+                          {
+                            label: "Usuń punkt",
+                            variant: "destructive",
+                            onClick: () => actDeletePoint(p.pointId, p.name),
+                          },
+                          ...(mapLink(p.lat, p.lon)
+                            ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }]
+                            : []),
+                        ]}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}
-      <PointEditDialog
-        point={visible.find((p) => p.pointId === editingId) ?? null}
-        onClose={() => setEditingId(null)}
-      />
     </Section>
   );
 }
 
+export type ReportGroup = {
+  key: string;
+  pointId: string;
+  commentId: string | null;
+  target: ReportItem["target"];
+  reports: ReportItem[];
+  oldest: number | null;
+};
+
+// Dedup zgłoszeń jest per zgłaszający, więc pięć osób to pięć dokumentów o jeden cel.
+// Moderator podejmuje jedną decyzję, dlatego kolejka pokazuje jeden wiersz.
+function groupReports(items: ReportItem[]): ReportGroup[] {
+  const groups = new Map<string, ReportGroup>();
+  for (const r of items) {
+    const key = `${r.pointId}/${r.commentId ?? ""}`;
+    const g = groups.get(key);
+    if (g) {
+      g.reports.push(r);
+      if (r.createdAt !== null && (g.oldest === null || r.createdAt < g.oldest)) g.oldest = r.createdAt;
+    } else {
+      groups.set(key, {
+        key, pointId: r.pointId, commentId: r.commentId, target: r.target,
+        reports: [r], oldest: r.createdAt,
+      });
+    }
+  }
+  return [...groups.values()].sort((a, b) => (a.oldest ?? Infinity) - (b.oldest ?? Infinity));
+}
+
+function reportReason(r: ReportItem): string {
+  return r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
+}
+
 export function QueueReports({ items, error, hideTest }: { items: ReportItem[]; error: string | null; hideTest: boolean }) {
   const visible = hideTest ? items.filter((r) => !r.isTest) : items;
+  const groups = useMemo(() => groupReports(visible), [visible]);
+  // Zegar z chwili wczytania listy, wystarczy dla wieku w dniach i godzinach.
+  const [now] = useState(() => Date.now());
   return (
-    <Section title="Zgłoszenia użytkowników" count={visible.length} truncated={items.length}>
+    <Section title="Zgłoszenia użytkowników" count={groups.length} truncated={items.length}>
       {error ? (
         <QueueError message={error} />
-      ) : visible.length === 0 ? (
+      ) : groups.length === 0 ? (
         <Empty text="Brak otwartych zgłoszeń." />
       ) : (
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead className="w-24">Cel</TableHead>
-              <TableHead className="w-40">Przyczyna</TableHead>
-              <TableHead>Powód (tekst)</TableHead>
+              <TableHead className="w-56">Cel</TableHead>
+              <TableHead>Co zgłoszono</TableHead>
+              <TableHead className="w-20">Czeka</TableHead>
               <TableHead className="w-96 text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {visible.map((r) => (
-              <ReportRow key={r.id} r={r} />
-            ))}
+            {groups.map((g) => <ReportRow key={g.key} group={g} now={now} />)}
           </TableBody>
         </Table>
       )}
@@ -218,40 +308,28 @@ export function QueueReports({ items, error, hideTest }: { items: ReportItem[]; 
   );
 }
 
-// Odrzucenie zgłoszenia jako niezasadne (treść zostaje bez zmian). Wydzielone,
-// bo używane i przy istniejącym celu, i gdy cel skasowany (report i tak da się domknąć).
-function dismissReport(r: ReportItem) {
-  act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)");
-}
-
-// Wiersz zgłoszenia z rozwijanym PODGLĄDEM zgłoszonej treści (resolve celu po id)
-// + akcjami NA CEL (zatwierdź/odrzuć), obok zamknięcia samego zgłoszenia.
-function ReportRow({ r }: { r: ReportItem }) {
+function ReportRow({ group, now }: { group: ReportGroup; now: number }) {
   // Wiersz startuje ZWINIĘTY — chevron rozwija sam PODGLĄD treści. Akcje są w linii
   // wiersza (kolumna Akcje), więc nie wymagają rozwijania.
   const [open, setOpen] = useState(false);
   // undefined = jeszcze nie pobrano (ładowanie), null = celu nie znaleziono, obiekt = cel.
   const [target, setTarget] = useState<CommentItem | DescriptionItem | null | undefined>(undefined);
-  const isComment = r.target === "comment";
-  const reason = r.flag ? FLAG_LABEL[r.flag] ?? r.flag : r.category ? CATEGORY_LABEL[r.category] ?? r.category : "—";
+  const isComment = group.target === "comment";
+  const { pointId, commentId } = group;
 
   // Eager-load celu w TLE (mimo że wiersz zwinięty) — akcje w wierszu potrzebują
   // danych celu. setState w callbacku promisy — poza synchronicznym ciałem efektu.
   useEffect(() => {
     let alive = true;
-    const p = isComment && r.commentId
-      ? fetchCommentById(r.pointId, r.commentId)
-      : fetchDescriptionById(r.pointId);
+    const p = isComment && commentId
+      ? fetchCommentById(pointId, commentId)
+      : fetchDescriptionById(pointId);
     p.then((t) => alive && setTarget(t)).catch(() => alive && setTarget(null));
-    return () => {
-      alive = false;
-    };
-  }, [isComment, r.commentId, r.pointId]);
+    return () => { alive = false; };
+  }, [isComment, commentId, pointId]);
 
-  // Cel jest już w stanie — chevron tylko pokazuje/chowa, bez ponownego fetcha.
-  function toggle() {
-    setOpen((o) => !o);
-  }
+  const reasons = [...new Set(group.reports.map(reportReason))];
+  const notes = group.reports.filter((r) => r.reason);
 
   return (
     <>
@@ -259,28 +337,35 @@ function ReportRow({ r }: { r: ReportItem }) {
         <TableCell className="align-top">
           <button
             type="button"
-            onClick={toggle}
+            onClick={() => setOpen((o) => !o)}
             className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
             title="Podgląd zgłoszonej treści"
           >
             {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
         </TableCell>
-        <TableCell className="align-top">
-          <div className="flex flex-col gap-1">
-            <Badge variant="outline">{TARGET_LABEL[r.target] ?? r.target}</Badge>
-            <span className="font-mono text-[10px] text-muted-foreground break-all">
-              {r.pointId}
-              {r.commentId ? `/${r.commentId}` : ""}
-            </span>
+        <TableCell className="align-top text-sm">
+          <PointLink pointId={pointId} />
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {TARGET_LABEL[group.target] ?? group.target}
+            {group.reports.length > 1 && ` · ${group.reports.length} osoby`}
           </div>
         </TableCell>
-        <TableCell className="align-top text-sm">{reason}</TableCell>
-        <TableCell className="align-top text-sm text-muted-foreground">
-          <p className="whitespace-pre-wrap break-words">{r.reason || "—"}</p>
+        <TableCell className="align-top text-sm">
+          <div className="flex flex-wrap gap-1">
+            {reasons.map((r) => (
+              <span key={r} className="rounded border bg-muted px-1.5 py-0.5 text-xs">{r}</span>
+            ))}
+          </div>
+          {notes.map((r) => (
+            <p key={r.id} className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+              {r.reason}
+            </p>
+          ))}
         </TableCell>
+        <TableCell className="align-top text-xs text-muted-foreground">{fmtAge(group.oldest, now)}</TableCell>
         <TableCell className="align-top">
-          <ReportActions r={r} target={target} isComment={isComment} />
+          <ReportActions group={group} target={target} isComment={isComment} />
         </TableCell>
       </TableRow>
       {open && (
@@ -290,7 +375,7 @@ function ReportRow({ r }: { r: ReportItem }) {
               {target === undefined ? (
                 <span className="text-xs text-muted-foreground">Ładowanie treści…</span>
               ) : target === null ? (
-                <span className="text-sm text-muted-foreground">—</span>
+                <span className="text-sm text-muted-foreground">Zgłoszonej treści już nie ma albo nie udało się jej wczytać.</span>
               ) : (
                 <ReportPreview target={target} isComment={isComment} />
               )}
@@ -302,97 +387,85 @@ function ReportRow({ r }: { r: ReportItem }) {
   );
 }
 
-// Akcje zgłoszenia — renderowane W LINII wiersza (kolumna Akcje), nie w rozwinięciu.
-// Działają na doładowanym w tle `target`. Główne akcje widoczne, reszta pod kebabem,
-// zestaw zależny od typu celu. Każda akcja na treści AUTO-ZAMYKA zgłoszenie (actioned);
-// „Odrzuć zgłoszenie" (dismissed) działa zawsze, także zanim cel się doładuje.
-function ReportActions({ r, target, isComment }: { r: ReportItem; target: CommentItem | DescriptionItem | null | undefined; isComment: boolean }) {
-  const [editing, setEditing] = useState(false);
+// Akcje zgłoszenia działają na doładowanym w tle `target` i domykają zgłoszenia
+// wszystkich osób o ten cel. „Odrzuć zgłoszenie" działa zawsze, także bez celu.
+function ReportActions({ group, target, isComment }: { group: ReportGroup; target: CommentItem | DescriptionItem | null | undefined; isComment: boolean }) {
   const { uids: blocked } = useBlocked();
+  const { openCard, openEdit } = usePointCard();
+  const { pointId, commentId } = group;
   const c = target && isComment ? (target as CommentItem) : null;
   const p = target && !isComment ? (target as DescriptionItem) : null;
   const hidden = target?.state === "rejected"; // ukryty w aplikacji
+  const closeActioned = () => closeTargetReports({ pointId, commentId }, "actioned");
 
-  // Po skutecznej akcji na treści zamykamy też zgłoszenie — znika z kolejki.
-  const closeActioned = () =>
-    act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte");
-
-  // Kebab = akcje drugorzędne, zależne od typu celu (pusty, gdy cel się nie doładował).
-  const kebab: KebabAction[] = c
-    ? blockActions(c.authorUid, c.authorName, blocked)
-    : p
-      ? [
-          {
-            label: "Usuń punkt",
-            variant: "destructive",
-            onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned),
-          },
-          hidden
-            ? {
-                label: "Opublikuj opis",
-                onClick: () => act({ action: "approveDescription", pointId: r.pointId }, "Opis opublikowany", closeActioned),
-              }
-            : {
-                label: "Ukryj opis",
-                onClick: () => {
-                  if (confirmHide("opis")) act({ action: "rejectDescription", pointId: r.pointId }, "Opis ukryty", closeActioned);
-                },
-              },
-          ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
-        ]
-      : [];
+  const kebab: KebabAction[] = [
+    { label: "Karta punktu", onClick: () => openCard(pointId) },
+    ...(c ? blockActions(c.authorUid, c.authorName, blocked) : []),
+    ...(p && p.description
+      ? [hidden
+          ? {
+              label: "Opublikuj opis",
+              onClick: () => act({ action: "approveDescription", pointId }, "Opis opublikowany", closeActioned),
+            }
+          : {
+              label: "Ukryj opis",
+              onClick: () => actHide({ action: "rejectDescription", pointId }, "opis", "Opis ukryty", closeActioned),
+            }]
+      : []),
+    ...(p && mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
+  ];
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
-      {c ? (
-        hidden ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
-            onClick={() =>
-              act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz opublikowany", closeActioned)
-            }
-          >
-            <Check className="h-3.5 w-3.5" />
-            Opublikuj komentarz
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
-            onClick={() => {
-              if (window.confirm("Usunąć komentarz? Zniknie z aplikacji (można przywrócić przez „Opublikuj komentarz”)."))
-                act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz usunięty", closeActioned);
-            }}
-          >
-            <EyeOff className="h-3.5 w-3.5" />
-            Usuń komentarz
-          </Button>
-        )
-      ) : p ? (
+      {c && (hidden ? (
         <Button
           size="sm"
           variant="outline"
-          className="h-7 gap-1 border-green-600/40 px-2 text-green-700 hover:border-green-600 hover:bg-green-600/10 hover:text-green-800 dark:text-green-500"
-          onClick={() => setEditing(true)}
+          className="h-7 gap-1 px-2"
+          onClick={() => act({ action: "approveComment", pointId, commentId: commentId! }, "Komentarz opublikowany", closeActioned)}
         >
-          <Pencil className="h-3.5 w-3.5" />
-          Edytuj punkt
+          <Check className="h-3.5 w-3.5" />
+          Opublikuj komentarz
         </Button>
-      ) : null}
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:bg-red-600/10 dark:text-red-500"
+          onClick={() => actHide({ action: "rejectComment", pointId, commentId: commentId! }, "komentarz", "Komentarz ukryty", closeActioned)}
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          Ukryj komentarz
+        </Button>
+      ))}
+      {p && (
+        <>
+          <Button size="sm" variant="outline" className="h-7 gap-1 px-2" onClick={() => openEdit(pointId, closeActioned)}>
+            <Pencil className="h-3.5 w-3.5" />
+            Edytuj punkt
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:bg-red-600/10 dark:text-red-500"
+            onClick={() => actDeletePoint(pointId, p.name, () =>
+              closeTargetReports({ pointId }, "actioned", { includeComments: true }))}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Usuń punkt
+          </Button>
+        </>
+      )}
       <Button
         size="sm"
         variant="outline"
         className="h-7 px-2"
-        title="Zgłoszenie bez podstaw — treść zostaje bez zmian"
-        onClick={() => dismissReport(r)}
+        title="Zgłoszenie bez podstaw, treść zostaje bez zmian"
+        onClick={() => actDismissReports({ pointId, commentId })}
       >
         Odrzuć zgłoszenie
       </Button>
       <KebabMenu actions={kebab} />
-      {p && <PointEditDialog point={editing ? p : null} onClose={() => setEditing(false)} onSaved={closeActioned} />}
     </div>
   );
 }
@@ -418,9 +491,7 @@ export function ReportPreview({ target, isComment }: { target: CommentItem | Des
             <span className="font-medium">{p.name || p.pointId}</span>
             <StateBadge state={p.state} />
           </div>
-          <PointProps p={p} />
           <p className="mt-1 whitespace-pre-wrap break-words">{p.description || "—"}</p>
-          <PointPhotos pointId={p.pointId} />
         </>
       )}
     </div>

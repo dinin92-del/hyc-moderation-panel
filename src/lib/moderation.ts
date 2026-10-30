@@ -67,11 +67,20 @@ export type DescriptionItem = {
   lat: number | null;
   lon: number | null;
   type: string;
-  waterNearby: boolean;
-  fireSpot: boolean;
-  overnight: boolean;
   /** Numer kontaktowy punktu — pole SERWEROWE, wpisywane tylko z panelu. */
   phone: string | null;
+  /** Numer od użytkownika czekający na werdykt, publiczny dopiero po nim. */
+  phonePending: string | null;
+  /** Dokument `points/{id}` istnieje. Punkt z assetu zwykle go nie ma. */
+  hasDoc: boolean;
+  /** Punkt jest w assecie, więc pozycji nie zmienia się z panelu. */
+  inAsset: boolean;
+  /** Pochodzenie widoczne na karcie punktu. */
+  origin: PointOrigin;
+  /** Moderator poprawił punkt, więc nazwa i typ idą z dokumentu. */
+  moderatorEdited: boolean;
+  /** Dane z assetu, null dla UGC. Karta punktu pokazuje je obok dokumentu. */
+  base: PointBase | null;
   /** `moderation-panel` dla punktów wpisanych ręcznie z panelu (podpis „Zespół Hyc!"). */
   createdVia: string | null;
   /**
@@ -145,6 +154,10 @@ export function descriptionDate(p: DescriptionItem): number | null {
   return p.descriptionAddedAt;
 }
 
+export type PointOrigin = "asset" | "overlay" | "ugc";
+
+export type PointBase = { name: string; type: string; lat: number; lon: number };
+
 export type ReportItem = {
   id: string;
   target: "point" | "description" | "comment";
@@ -160,6 +173,8 @@ export type ReportItem = {
   status: string;
   /** Rozwiązanie zamkniętego zgłoszenia: `actioned` | `dismissed` | null (otwarte). */
   resolution: string | null;
+  decisionReason: string | null;
+  resolvedAt: number | null;
 };
 
 export type LogItem = {
@@ -169,8 +184,9 @@ export type LogItem = {
   commentId: string | null;
   text: string;
   ai: { state?: string; labels?: string[]; score?: number; reason?: string; model?: string } | null;
-  human: { state?: string; reviewerUid?: string } | null;
+  human: { state?: string; reviewerUid?: string; reason?: string } | null;
   final: { state?: string } | null;
+  changedFields: string[];
   overrodeAI: boolean;
   source: string;
   createdAt: number | null;
@@ -228,10 +244,13 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     lat: typeof d.lat === "number" ? d.lat : null,
     lon: typeof d.lon === "number" ? d.lon : null,
     type: d.type ?? "",
-    waterNearby: !!d.waterNearby,
-    fireSpot: !!d.fireSpot,
-    overnight: !!d.overnight,
     phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
+    phonePending: typeof d.phonePending === "string" && d.phonePending !== "" ? d.phonePending : null,
+    hasDoc: true,
+    inAsset: false,
+    origin: d.source === "ugc" ? "ugc" : "overlay",
+    moderatorEdited: !!d.moderatorEdit,
+    base: null,
     createdVia: d.createdVia ?? null,
     descriptionAuthorUid: typeof d.descriptionAuthorUid === "string" &&
       d.descriptionAuthorUid !== "" ? d.descriptionAuthorUid : null,
@@ -254,7 +273,9 @@ function mapReport(d: DocumentData, id: string): ReportItem {
     createdAt: millis(d.createdAt),
     isTest: !!d._test || isSmokeId(d.pointId, d.commentId, d.reporterUid),
     status: d.status ?? "open",
-    resolution: d.resolution ?? null,
+    resolution: d.status === "actioned" || d.status === "dismissed" ? d.status : null,
+    decisionReason: d.decisionReason ?? null,
+    resolvedAt: millis(d.resolvedAt),
   };
 }
 
@@ -268,6 +289,7 @@ function mapLog(d: DocumentData, id: string): LogItem {
     ai: d.ai ?? null,
     human: d.human ?? null,
     final: d.final ?? null,
+    changedFields: Array.isArray(d.changedFields) ? d.changedFields : [],
     overrodeAI: !!d.overrodeAI,
     source: d.source ?? "",
     createdAt: millis(d.createdAt),
@@ -278,9 +300,20 @@ function mapLog(d: DocumentData, id: string): LogItem {
 const byNewest = (a: { createdAt: number | null }, b: { createdAt: number | null }) =>
   (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity);
 
+// Kolejka idzie od najstarszych: to one najdłużej czekają na decyzję.
+const byOldest = (a: { createdAt: number | null }, b: { createdAt: number | null }) =>
+  (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity);
+
+// Stany czekające na człowieka. `pending` i `reviewing` powinny zejść same, więc
+// wiszący dokument bez tego nie miałby w panelu żadnego miejsca.
+const WAITING_STATES = ["needs_review", "pending", "reviewing"];
+
 /** Sort listy OPISÓW — po dacie opisu, nie punktu. Patrz [descriptionDate]. */
 const byNewestDescription = (a: DescriptionItem, b: DescriptionItem) =>
   (descriptionDate(b) ?? -Infinity) - (descriptionDate(a) ?? -Infinity);
+
+/** Punkt bez opisu w kolejce to zdjęcia lub telefon, stąd data punktu na zapas. */
+const queueDate = (p: DescriptionItem) => descriptionDate(p) ?? p.createdAt;
 
 // ── Autor z odwrotnego indeksu (plan autor-prywatny-nick-1027) ──────────────
 // Publiczne `authorUid` bywa wyczyszczone. Prawdę trzyma `contributionAuthors/
@@ -375,7 +408,7 @@ function emitThenFill<T>(
 export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e: unknown) => void) {
   const q = query(
     collectionGroup(db, "comments"),
-    where("moderation.state", "==", "needs_review"),
+    where("moderation.state", "in", WAITING_STATES),
     limit(QUEUE_LIMIT),
   );
   const gen = { n: 0 };
@@ -385,7 +418,7 @@ export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e
       const out = snap.docs.map((d) =>
         mapComment(d.data(), d.id, d.ref.parent.parent?.id ?? ""),
       );
-      out.sort(byNewest);
+      out.sort(byOldest);
       emitThenFill(out, fillCommentAuthors, cb, gen);
     },
     onErr,
@@ -396,17 +429,16 @@ export function watchCommentsQueue(cb: (items: CommentItem[]) => void, onErr: (e
 export function watchDescriptionsQueue(cb: (items: DescriptionItem[]) => void, onErr: (e: unknown) => void) {
   const q = query(
     collection(db, "points"),
-    where("moderation.state", "==", "needs_review"),
+    where("moderation.state", "in", WAITING_STATES),
     limit(QUEUE_LIMIT),
   );
   const gen = { n: 0 };
   return onSnapshot(
     q,
     (snap) => {
-      const out = snap.docs
-        .map((d) => mapDescription(d.data(), d.id))
-        .filter((p) => p.description.length > 0);
-      out.sort(byNewestDescription);
+      // Bez filtra pustego opisu: punkt z samymi zdjęciami też czeka na decyzję.
+      const out = snap.docs.map((d) => mapDescription(d.data(), d.id));
+      out.sort((a, b) => (queueDate(a) ?? Infinity) - (queueDate(b) ?? Infinity));
       emitThenFill(out, fillDescriptionAuthors, cb, gen);
     },
     onErr,
@@ -420,7 +452,7 @@ export function watchReportsQueue(cb: (items: ReportItem[]) => void, onErr: (e: 
     q,
     (snap) => {
       const out = snap.docs.map((d) => mapReport(d.data(), d.id));
-      out.sort(byNewest);
+      out.sort(byOldest);
       cb(out);
     },
     onErr,
@@ -508,15 +540,8 @@ export async function fetchUserNames(uids: string[]): Promise<Map<string, string
  * (punkt usunięty) po prostu nie wracają.
  */
 export async function fetchPointsByIds(ids: string[]): Promise<DescriptionItem[]> {
-  const snaps = await Promise.all(
-    ids.map((id) => getDoc(doc(db, "points", id)).catch(() => null)),
-  );
-  const out: DescriptionItem[] = [];
-  for (const s of snaps) {
-    const data = s?.data();
-    if (data) out.push(mapDescription(data, s!.id));
-  }
-  return fillDescriptionAuthors(out);
+  const points = await Promise.all(ids.map((id) => fetchDescriptionById(id).catch(() => null)));
+  return points.filter((p) => p !== null);
 }
 
 /** Wszystkie zgłoszenia (otwarte i zamknięte), najnowsze pierwsze. */
@@ -533,16 +558,10 @@ export async function fetchAllReports(take: number = BROWSE_LIMIT): Promise<Repo
  * złożonego) — sort po stronie klienta; wpisów per treść jest garść.
  */
 export async function fetchLogFor(pointId: string, commentId: string | null): Promise<LogItem[]> {
-  // ⛔ Odsiew po `targetType` musi być W ZAPYTANIU, nie po stronie klienta.
-  // `limit` obowiązuje PRZED filtrem klienckim, więc punkt z żywą dyskusją
-  // (dużo wpisów komentarzy) wypełniał okno logami komentarzy, a po odfiltrowaniu
-  // zostawała garść wpisów opisu — historia wyglądała na kompletną i nie była.
-  const clauses = [
-    where("pointId", "==", pointId),
-    where("targetType", "==", commentId ? "comment" : "description"),
-  ];
+  // Bez filtra `targetType`: historia punktu to także edycje, usunięcia i przywrócenia.
+  const clauses = [where("pointId", "==", pointId)];
   if (commentId) clauses.push(where("commentId", "==", commentId));
-  const snap = await getDocs(query(collection(db, "moderationLog"), ...clauses, limit(50)));
+  const snap = await getDocs(query(collection(db, "moderationLog"), ...clauses, limit(200)));
   const out = snap.docs.map((d) => mapLog(d.data(), d.id));
   out.sort(byNewest);
   return out;
@@ -555,11 +574,16 @@ type DecisionInput = {
     | "rejectComment"
     | "approveDescription"
     | "rejectDescription"
-    | "closeReport";
+    | "closeReport"
+    | "closeReportsForTarget";
   pointId?: string;
   commentId?: string;
   reportId?: string;
   resolution?: "actioned" | "dismissed";
+  /** Powód decyzji, trafia do moderationLog albo do zgłoszenia. */
+  reason?: string;
+  /** `closeReportsForTarget`: także zgłoszenia komentarzy tego punktu. */
+  includeComments?: boolean;
 };
 
 export async function decide(input: DecisionInput): Promise<void> {
@@ -581,8 +605,8 @@ export async function setUserBlock(
 }
 
 /** Odblokowanie autora — kasuje moderationBlocks/{uid} (setUserBlock blocked=false). */
-export async function unblockUser(targetUid: string): Promise<void> {
-  await setUserBlock(targetUid, false);
+export async function unblockUser(targetUid: string, reason?: string): Promise<void> {
+  await setUserBlock(targetUid, false, reason);
 }
 
 // ── Edycja / usuwanie punktu przez moderatora (callable) ─────────────────────
@@ -596,17 +620,18 @@ export type PointEditFields = Partial<{
   type: string;
   lat: number;
   lon: number;
-  waterNearby: boolean;
-  fireSpot: boolean;
-  overnight: boolean;
   /** Numer kontaktowy; `null` czyści pole w dokumencie. */
   phone: string | null;
 }>;
 
 /** Zapisuje zmienione pola punktu (tylko podane wchodzą do update). */
-export async function editPoint(pointId: string, fields: PointEditFields): Promise<void> {
+export async function editPoint(
+  pointId: string,
+  fields: PointEditFields,
+  reason?: string,
+): Promise<void> {
   const fn = httpsCallable(functions, "onModeratorEditPoint");
-  await fn({ pointId, fields });
+  await fn({ pointId, fields, reason });
 }
 
 // ── Ręczne dodanie punktu (callable onModeratorCreatePoint) ──────────────────
@@ -621,32 +646,140 @@ export type PointCreateFields = {
   lat: number;
   lon: number;
   description?: string;
-  waterNearby?: boolean;
-  fireSpot?: boolean;
-  overnight?: boolean;
   /** Numer kontaktowy punktu (opcjonalny; walidacja po stronie callable). */
   phone?: string;
 };
 
+/** Kolizja z istniejącym punktem, którą zgłasza serwer przy dodawaniu. */
+export type DuplicateHit = {
+  id: string | null;
+  name: string | null;
+  dist_m: number;
+  why: string;
+};
+
 /** Tworzy nowy punkt UGC. Zwraca nadane `UGC:<id>`. */
-export async function createPoint(fields: PointCreateFields): Promise<string> {
-  const fn = httpsCallable<{ fields: PointCreateFields }, { pointId: string }>(
+export async function createPoint(fields: PointCreateFields, force = false): Promise<string> {
+  const fn = httpsCallable<{ fields: PointCreateFields; force: boolean }, { pointId: string }>(
     functions,
     "onModeratorCreatePoint",
   );
-  const res = await fn({ fields });
+  const res = await fn({ fields, force });
   return res.data.pointId;
 }
 
-/** Twarde usunięcie punktu (+ kaskada komentarzy) z bazy. Nieodwracalne. */
-export async function deletePoint(pointId: string): Promise<void> {
+/**
+ * Lista kolizji z błędu `already-exists`, null dla każdego innego błędu.
+ * @param e błąd z callable
+ */
+export function duplicatesOf(e: unknown): DuplicateHit[] | null {
+  const err = e as { code?: string; details?: { duplicates?: DuplicateHit[] } } | null;
+  return err?.code === "functions/already-exists" ? err.details?.duplicates ?? [] : null;
+}
+
+/** Usunięcie punktu: UGC na stałe, punkt z bazy tombstone'em (odwracalne). */
+export async function deletePoint(pointId: string, reason?: string): Promise<void> {
   const fn = httpsCallable(functions, "onModeratorDeletePoint");
-  await fn({ pointId });
+  await fn({ pointId, reason });
+}
+
+/** Zdejmuje tombstone. Serwer wymaga powodu min. 25 znaków. */
+export async function restorePoint(pointId: string, powod: string): Promise<void> {
+  const fn = httpsCallable(functions, "onModeratorRestorePoint");
+  await fn({ pointId, powod });
+}
+
+// ── Szukanie punktów (callable) ──────────────────────────────────────────────
+export type PointView = "all" | "suppressed" | "ugc" | "edited";
+
+export type PointHit = {
+  id: string;
+  name: string | null;
+  type: string | null;
+  lat: number | null;
+  lon: number | null;
+  origin: PointOrigin;
+  suppressed: boolean;
+  hasDoc: boolean;
+  state: ModState | null;
+  status: string | null;
+  phone: string | null;
+  createdVia: string | null;
+  distanceM?: number;
+};
+
+export type PointSearchInput = {
+  q?: string;
+  type?: string;
+  view?: PointView;
+  near?: { lat: number; lon: number };
+  limit?: number;
+};
+
+/** Szuka w całej bazie: asset + dokumenty + usunięte. Czyta serwer, bo klient nie ma assetu. */
+export async function searchPoints(
+  input: PointSearchInput,
+): Promise<{ hits: PointHit[]; total: number }> {
+  const fn = httpsCallable<PointSearchInput, { hits: PointHit[]; total: number }>(
+    functions,
+    "moderatorSearchPoints",
+  );
+  return (await fn(input)).data;
+}
+
+// Odczyt bazy skleja wiersze z jednej chwili w jedno wywołanie, bo sto zgłoszeń to
+// sto wierszy, a każde wywołanie to start funkcji z indeksem w pamięci.
+const LOOKUP_BATCH = 200;
+const baseCache = new Map<string, Promise<PointBase | null>>();
+let lookupQueue: Array<{
+  id: string;
+  resolve: (b: PointBase | null) => void;
+  reject: (e: unknown) => void;
+}> = [];
+
+async function flushLookups() {
+  const batch = lookupQueue;
+  lookupQueue = [];
+  const fn = httpsCallable<{ ids: string[] }, { points: Record<string, PointBase> }>(
+    functions,
+    "moderatorLookupPoints",
+  );
+  for (let i = 0; i < batch.length; i += LOOKUP_BATCH) {
+    const part = batch.slice(i, i + LOOKUP_BATCH);
+    try {
+      const { points } = (await fn({ ids: part.map((p) => p.id) })).data;
+      for (const p of part) p.resolve(points[p.id] ?? null);
+    } catch (e) {
+      for (const p of part) {
+        baseCache.delete(p.id);
+        p.reject(e);
+      }
+    }
+  }
+}
+
+/** Dane punktu z assetu. UGC nie ma tam wpisu. */
+export function fetchPointBase(id: string): Promise<PointBase | null> {
+  if (id.startsWith("UGC:")) return Promise.resolve(null);
+  const hit = baseCache.get(id);
+  if (hit) return hit;
+  const promise = new Promise<PointBase | null>((resolve, reject) => {
+    if (lookupQueue.length === 0) setTimeout(() => void flushLookups(), 0);
+    lookupQueue.push({ id, resolve, reject });
+  });
+  baseCache.set(id, promise);
+  return promise;
+}
+
+/** Czy punkt ma tombstone, czyli zniknął z mapy i da się go przywrócić. */
+export async function fetchIsSuppressed(id: string): Promise<boolean> {
+  return (await getDoc(doc(db, "suppressedPoints", id))).exists();
 }
 
 // ── Lista zablokowanych (moderationBlocks) ───────────────────────────────────
 export type BlockedItem = {
   uid: string;
+  /** uid moderatora albo `system` przy blokadzie automatycznej. */
   blockedBy: string;
   reason: string;
   blockedAt: number | null;
@@ -684,12 +817,55 @@ export async function fetchCommentById(pointId: string, commentId: string): Prom
   return filled;
 }
 
-/** Opis punktu po points/{pointId} (podgląd w zgłoszeniu). */
+/**
+ * Punkt tak, jak widzi go apka: baza z assetu, na niej dokument. Nazwa i typ z
+ * dokumentu tylko po poprawce moderatora, pozycja punktu z assetu zawsze z assetu
+ * (lustro `applyVisibleOverride`). Null = punktu nie ma ani w bazie, ani w Firestore.
+ */
 export async function fetchDescriptionById(pointId: string): Promise<DescriptionItem | null> {
-  const snap = await getDoc(doc(db, "points", pointId));
-  if (!snap.exists()) return null;
-  const [filled] = await fillDescriptionAuthors([mapDescription(snap.data(), snap.id)]);
+  const [snap, base] = await Promise.all([
+    getDoc(doc(db, "points", pointId)),
+    fetchPointBase(pointId),
+  ]);
+  if (!snap.exists() && !base) return null;
+  const mapped = mapDescription(snap.exists() ? snap.data() : {}, pointId);
+  if (!base) {
+    const [filled] = await fillDescriptionAuthors([mapped]);
+    return filled;
+  }
+  const edited = mapped.moderatorEdited;
+  const point: DescriptionItem = {
+    ...mapped,
+    hasDoc: snap.exists(),
+    inAsset: true,
+    origin: edited ? "overlay" : "asset",
+    name: edited && mapped.name ? mapped.name : base.name,
+    type: edited && mapped.type ? mapped.type : base.type,
+    lat: base.lat,
+    lon: base.lon,
+    base,
+  };
+  if (!snap.exists()) return point;
+  const [filled] = await fillDescriptionAuthors([point]);
   return filled;
+}
+
+/** Komentarze punktu, każdy stan. Dla karty punktu. */
+export async function fetchCommentsForPoint(pointId: string): Promise<CommentItem[]> {
+  const snap = await getDocs(query(collection(db, "points", pointId, "comments"), limit(200)));
+  const out = snap.docs.map((d) => mapComment(d.data(), d.id, pointId));
+  out.sort(byNewest);
+  return fillCommentAuthors(out);
+}
+
+/** Zgłoszenia punktu, otwarte i zamknięte. Dla karty punktu. */
+export async function fetchReportsForPoint(pointId: string): Promise<ReportItem[]> {
+  const snap = await getDocs(
+    query(collection(db, "reports"), where("pointId", "==", pointId), limit(200)),
+  );
+  const out = snap.docs.map((d) => mapReport(d.data(), d.id));
+  out.sort(byNewest);
+  return out;
 }
 
 // ── Zdjęcia punktu (photos/{id}) — wątek zdjęć 0818 ──────────────────────────
@@ -703,7 +879,7 @@ export type PhotoItem = {
   /** Jak [CommentItem.authorCleared]. */
   authorCleared: boolean;
   authorName: string;
-  /** `pending` | `visible` | `removed` */
+  /** `pending` | `uploaded` | `visible` | `removed`. `uploaded` czeka na decyzję. */
   status: string;
   thumbUrl: string;
   fullUrl: string;
@@ -716,7 +892,7 @@ function httpsOnly(v: unknown): string {
   return typeof v === "string" && v.startsWith("https://") ? v : "";
 }
 
-const PHOTO_STATUSES = new Set(["pending", "visible", "removed"]);
+const PHOTO_STATUSES = new Set(["pending", "uploaded", "visible", "removed"]);
 
 function mapPhoto(d: DocumentData, id: string): PhotoItem {
   return {
@@ -724,7 +900,7 @@ function mapPhoto(d: DocumentData, id: string): PhotoItem {
     pointId: typeof d.pointId === "string" ? d.pointId : null,
     authorUid: typeof d.authorUid === "string" ? d.authorUid : "",
     authorCleared: authorFieldCleared(d, "authorUid"),
-    // Nazwa leci m.in. do window.confirm — znaki sterujące/nowe linie mogłyby
+    // Nazwa leci m.in. do okna potwierdzenia — znaki sterujące/nowe linie mogłyby
     // rozłamać treść dialogu, normalizujemy do pojedynczych spacji.
     authorName: typeof d.authorName === "string"
       ? d.authorName.replace(/\s+/g, " ").trim()

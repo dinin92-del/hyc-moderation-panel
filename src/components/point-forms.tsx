@@ -15,8 +15,10 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   createPoint,
+  duplicatesOf,
   editPoint,
   type DescriptionItem,
+  type DuplicateHit,
   type PointCreateFields,
   type PointEditFields,
 } from "@/lib/moderation";
@@ -43,20 +45,16 @@ function PhonePreview({ value }: { value: string }) {
   );
 }
 
-// Inline formularz kuratorskiej edycji punktu (rozwijany pod wierszem). Wysyła
-// tylko ZMIENIONE pola (callable wymaga ≥1). Zmiana nazwy/opisu → serwer zapisuje
-// approved + contentHash (bez re-moderacji). Bez nowej zależności (Input/Select/
-// natywne checkboxy + textarea).
+// Formularz kuratorskiej edycji punktu. Wysyła tylko ZMIENIONE pola (callable wymaga
+// ≥1). Zmiana nazwy/opisu → serwer zapisuje approved + contentHash (bez re-moderacji).
 function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onDone: () => void; onSaved?: () => void }) {
   const [name, setName] = useState(point.name ?? "");
   const [description, setDescription] = useState(point.description ?? "");
   const [type, setType] = useState(point.type ?? "");
   const [lat, setLat] = useState(point.lat?.toString() ?? "");
   const [lon, setLon] = useState(point.lon?.toString() ?? "");
-  const [waterNearby, setWaterNearby] = useState(point.waterNearby);
-  const [fireSpot, setFireSpot] = useState(point.fireSpot);
-  const [overnight, setOvernight] = useState(point.overnight);
   const [phone, setPhone] = useState(point.phone ?? "");
+  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function submit() {
@@ -66,26 +64,25 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
       fields.description = description.trim() || null;
     }
     if (type !== point.type) fields.type = type;
-    if (lat.trim() !== "" && Number(lat) !== point.lat) {
-      const v = Number(lat);
-      if (!Number.isFinite(v)) return toast.error("Szerokość: nieprawidłowa liczba");
-      fields.lat = v;
+    if (!point.inAsset) {
+      if (lat.trim() !== "" && toNumber(lat) !== point.lat) {
+        const v = toNumber(lat);
+        if (!Number.isFinite(v)) return toast.error("Szerokość: nieprawidłowa liczba");
+        fields.lat = v;
+      }
+      if (lon.trim() !== "" && toNumber(lon) !== point.lon) {
+        const v = toNumber(lon);
+        if (!Number.isFinite(v)) return toast.error("Długość: nieprawidłowa liczba");
+        fields.lon = v;
+      }
     }
-    if (lon.trim() !== "" && Number(lon) !== point.lon) {
-      const v = Number(lon);
-      if (!Number.isFinite(v)) return toast.error("Długość: nieprawidłowa liczba");
-      fields.lon = v;
-    }
-    if (waterNearby !== point.waterNearby) fields.waterNearby = waterNearby;
-    if (fireSpot !== point.fireSpot) fields.fireSpot = fireSpot;
-    if (overnight !== point.overnight) fields.overnight = overnight;
     // Pusty input = czyszczenie numeru (null w dokumencie). Format waliduje
     // callable (sanitizePhone) — panel nie duplikuje reguł.
     if (phone.trim() !== (point.phone ?? "")) fields.phone = phone.trim() || null;
     if (Object.keys(fields).length === 0) return toast("Brak zmian do zapisania");
     setSaving(true);
     try {
-      await editPoint(point.pointId, fields);
+      await editPoint(point.pointId, fields, reason.trim());
       toast.success("Punkt zaktualizowany");
       onSaved?.();
       onDone();
@@ -95,17 +92,6 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
       setSaving(false);
     }
   }
-
-  const flag = (
-    label: string,
-    checked: boolean,
-    set: (v: boolean) => void,
-  ) => (
-    <label className="flex items-center gap-2 text-sm">
-      <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} />
-      {label}
-    </label>
-  );
 
   return (
     <div className="space-y-3">
@@ -134,16 +120,23 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
           onChange={(e) => setDescription(e.target.value)}
         />
       </label>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Szerokość (lat)</span>
-          <Input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Długość (lon)</span>
-          <Input value={lon} onChange={(e) => setLon(e.target.value)} inputMode="decimal" />
-        </label>
-      </div>
+      {point.inAsset ? (
+        <p className="text-xs text-muted-foreground">
+          Pozycja {point.lat}, {point.lon} pochodzi z bazy punktów. Z panelu się jej nie
+          zmienia, bo apka i tak wzięłaby ją z bazy.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Szerokość (lat)</span>
+            <Input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" />
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Długość (lon)</span>
+            <Input value={lon} onChange={(e) => setLon(e.target.value)} inputMode="decimal" />
+          </label>
+        </div>
+      )}
       <label className="block space-y-1 text-sm sm:max-w-xs">
         <span className="text-muted-foreground">Telefon (opcjonalny)</span>
         <Input
@@ -154,11 +147,10 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
         />
         <PhonePreview value={phone} />
       </label>
-      <div className="flex flex-wrap gap-4">
-        {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
-        {flag("Miejsce na ogień", fireSpot, setFireSpot)}
-        {flag("Nocleg", overnight, setOvernight)}
-      </div>
+      <label className="block space-y-1 text-sm">
+        <span className="text-muted-foreground">Powód zmiany (opcjonalny, zostaje w historii)</span>
+        <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+      </label>
       <div className="flex gap-2">
         <Button size="sm" onClick={submit} disabled={saving}>
           {saving ? "Zapisywanie…" : "Zapisz zmiany"}
@@ -187,11 +179,11 @@ export function PointEditDialog({ point, onClose, onSaved }: { point: Descriptio
 // ── Ręczne dodawanie punktu ──────────────────────────────────────────────────
 
 /**
- * Formularz ręcznego dodania punktu (nazwa/kategoria/współrzędne/opis/flagi) —
+ * Formularz ręcznego dodania punktu (nazwa/kategoria/współrzędne/opis) —
  * w modalu pod przyciskiem „Dodaj punkt" przy tabach. Punkt idzie przez callable
  * `onModeratorCreatePoint` i jest widoczny w apce od razu (UGC, approved) — bez
  * czekania na moderację i bez wydania nowej wersji. Formularz po zapisie czyści
- * treść, ale ZOSTAWIA kategorię i flagi (modal zostaje otwarty): wpisywanie
+ * treść, ale ZOSTAWIA kategorię (modal zostaje otwarty): wpisywanie
  * serii punktów tego samego typu to główny scenariusz (import z listy adresów).
  * Dodane punkty widać w „Wszystkie treści" jako „Nowy punkt".
  */
@@ -201,11 +193,10 @@ function AddPointForm() {
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
   const [description, setDescription] = useState("");
-  const [waterNearby, setWaterNearby] = useState(false);
-  const [fireSpot, setFireSpot] = useState(false);
-  const [overnight, setOvernight] = useState(false);
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
+  // Kolizje z ostatniej próby. Dodanie mimo nich wymaga świadomego kliknięcia.
+  const [duplicates, setDuplicates] = useState<DuplicateHit[] | null>(null);
 
   // Wklejenie pary („49.412, 20.712" lub link z mapy) w pole szerokości rozbija
   // się na oba pola — przy przepisywaniu z listy to najczęstszy ruch.
@@ -229,43 +220,31 @@ function AddPointForm() {
   );
   const canSubmit = name.trim() !== "" && type !== "" && coordsOk && !saving;
 
-  async function submit() {
+  async function submit(force = false) {
     if (!canSubmit) return;
-    const fields: PointCreateFields = {
-      name: name.trim(),
-      type,
-      lat: latNum,
-      lon: lonNum,
-      waterNearby,
-      fireSpot,
-      overnight,
-    };
+    const fields: PointCreateFields = { name: name.trim(), type, lat: latNum, lon: lonNum };
     if (description.trim() !== "") fields.description = description.trim();
     if (phone.trim() !== "") fields.phone = phone.trim();
     setSaving(true);
     try {
-      await createPoint(fields);
+      await createPoint(fields, force);
       toast.success("Punkt dodany — widoczny w apce");
-      // Treść czyścimy, kategorię/flagi zostawiamy pod kolejny punkt z serii.
+      // Treść czyścimy, kategorię zostawiamy pod kolejny punkt z serii.
       // Telefon też czyścimy — numer jest per-punkt, nie per-seria.
       setName("");
       setLat("");
       setLon("");
       setDescription("");
       setPhone("");
+      setDuplicates(null);
     } catch (e) {
-      toast.error("Nie udało się dodać: " + (e instanceof Error ? e.message : "błąd"));
+      const hits = duplicatesOf(e);
+      if (hits) setDuplicates(hits);
+      else toast.error("Nie udało się dodać: " + (e instanceof Error ? e.message : "błąd"));
     } finally {
       setSaving(false);
     }
   }
-
-  const flag = (label: string, checked: boolean, set: (v: boolean) => void) => (
-    <label className="flex items-center gap-2 text-sm">
-      <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} />
-      {label}
-    </label>
-  );
 
   return (
     <div>
@@ -358,14 +337,27 @@ function AddPointForm() {
             <PhonePreview value={phone} />
           </label>
 
-          <div className="flex flex-wrap gap-4">
-            {flag("Woda w pobliżu", waterNearby, setWaterNearby)}
-            {flag("Miejsce na ogień", fireSpot, setFireSpot)}
-            {flag("Nocleg", overnight, setOvernight)}
-          </div>
+          {duplicates && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <p className="font-medium">Taki punkt może już istnieć:</p>
+              <ul className="mt-1 list-inside list-disc text-xs">
+                {duplicates.slice(0, 5).map((d, i) => (
+                  <li key={d.id ?? i}>
+                    {d.name || "(bez nazwy)"}, {d.dist_m} m ({d.why})
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs">
+                Jeśli to ten sam obiekt, popraw istniejący punkt w zakładce Punkty.
+              </p>
+              <Button size="sm" variant="outline" className="mt-2" disabled={saving} onClick={() => submit(true)}>
+                To osobny obiekt, dodaj mimo to
+              </Button>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
-            <Button size="sm" onClick={submit} disabled={!canSubmit}>
+            <Button size="sm" onClick={() => submit()} disabled={!canSubmit}>
               {saving ? "Dodawanie…" : "Dodaj punkt"}
             </Button>
             <span className="text-xs text-muted-foreground">* pola wymagane</span>

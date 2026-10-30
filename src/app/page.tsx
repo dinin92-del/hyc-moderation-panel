@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { ExternalLink, Plus } from "lucide-react";
 import { AuthGate } from "@/components/auth-gate";
 import { BlockedProvider } from "@/components/blocked-context";
 import { BlockedTab } from "@/components/blocked-tab";
+import { ConfirmHost } from "@/components/confirm-host";
 import { ContentTab } from "@/components/content-tab";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
+import { PointCardProvider } from "@/components/point-card";
 import { AddPointDialog } from "@/components/point-forms";
+import { PointsTab } from "@/components/points-tab";
 import { QueueComments, QueueDescriptions, QueueReports } from "@/components/queue";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -27,7 +30,10 @@ export default function Home() {
     <AuthGate>
       {({ user, signOut }) => (
         <BlockedProvider>
-          <Panel email={user.email ?? ""} signOut={signOut} />
+          <PointCardProvider>
+            <Panel email={user.email ?? ""} signOut={signOut} />
+          </PointCardProvider>
+          <ConfirmHost />
         </BlockedProvider>
       )}
     </AuthGate>
@@ -70,6 +76,14 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
           <p className="text-xs text-muted-foreground">Hyc do Budy · {email}</p>
         </div>
         <div className="flex items-center gap-3">
+          <a
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground underline"
+            href="https://hyc-mapa.web.app"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Mapa punktów <ExternalLink className="h-3 w-3" />
+          </a>
           <EnvSwitch />
           <Button variant="outline" size="sm" onClick={signOut}>
             Wyloguj
@@ -84,6 +98,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <TabsList>
               <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
+              <TabsTrigger value="points">Punkty</TabsTrigger>
               <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
               <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
             </TabsList>
@@ -110,6 +125,10 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
             <QueueComments items={comments} error={commentsErr} hideTest={hideTest} />
             <QueueDescriptions items={descs} error={descsErr} hideTest={hideTest} />
             <QueueReports items={reports} error={reportsErr} hideTest={hideTest} />
+          </TabsContent>
+
+          <TabsContent value="points" className="pt-4">
+            <PointsTab />
           </TabsContent>
 
           <TabsContent value="content" className="pt-4">

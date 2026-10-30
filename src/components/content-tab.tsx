@@ -28,7 +28,7 @@ import {
   type KebabAction,
 } from "@/components/common";
 import { HistoryPanel } from "@/components/history-panel";
-import { PointEditDialog } from "@/components/point-forms";
+import { usePointCard } from "@/components/point-card-context";
 import { ReportPreview } from "@/components/queue";
 import {
   BROWSE_LIMIT,
@@ -48,7 +48,7 @@ import {
 import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, fmtDate } from "@/lib/labels";
 import { mapLink } from "@/lib/coords";
 import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
-import { act, actDeletePoint, confirmHide } from "@/lib/actions";
+import { act, actDeletePoint, actDismissReports, actHide, closeTargetReports } from "@/lib/actions";
 
 // ── Wszystkie treści (scalone: nowe punkty / opisy / komentarze / zgłoszenia) ──
 
@@ -92,10 +92,6 @@ type ContentItem =
   | { kind: "comment"; key: string; createdAt: number | null; isTest: boolean; c: CommentItem }
   | { kind: "report"; key: string; createdAt: number | null; isTest: boolean; r: ReportItem };
 
-// Edycja z poziomu wiersza; onSaved pozwala wierszowi zgłoszenia domknąć
-// zgłoszenie po zapisie (parytet z kolejką).
-type EditingPoint = { p: DescriptionItem; onSaved?: () => void };
-
 const FILTER_ORDER: ContentFilter[] = ["all", "point", "description", "comment", "report"];
 const FILTER_LABEL: Record<ContentFilter, string> = {
   all: "Wszystko",
@@ -129,7 +125,6 @@ export function ContentTab() {
   const [filter, setFilter] = useState<ContentFilter>("all");
   const [search, setSearch] = useState("");
   const [hideTest, setHideTest] = useState(false);
-  const [editing, setEditing] = useState<EditingPoint | null>(null);
   // Ile pobrać PER KOLEKCJA z serwera (rośnie „Załaduj więcej z serwera") vs
   // która strona po 50 pokazujemy z tego, co już mamy w pamięci (Poprzednia/
   // Następna) — dwa OSOBNE wymiary paginacji, nie mylić.
@@ -307,7 +302,6 @@ export function ContentTab() {
                   probedIds={probedIds}
                   userNames={userNames}
                   blocked={blocked}
-                  onEdit={setEditing}
                   reload={reload}
                 />
               ))}
@@ -359,12 +353,6 @@ export function ContentTab() {
           </div>
         )}
       </Section>
-
-      <PointEditDialog
-        point={editing?.p ?? null}
-        onClose={() => setEditing(null)}
-        onSaved={() => { editing?.onSaved?.(); reload(); }}
-      />
     </div>
   );
 }
@@ -375,7 +363,6 @@ function ContentRow({
   probedIds,
   userNames,
   blocked,
-  onEdit,
   reload,
 }: {
   item: ContentItem;
@@ -383,9 +370,9 @@ function ContentRow({
   probedIds: Set<string>;
   userNames: Map<string, string>;
   blocked: Set<string>;
-  onEdit: (e: EditingPoint) => void;
   reload: () => void;
 }) {
+  const { openCard, openEdit } = usePointCard();
   const [open, setOpen] = useState(false);
   // Cel zgłoszenia — doładowywany w TLE tylko dla OTWARTYCH zgłoszeń (akcje na
   // celu). Zamknięte zgłoszenie jest zapisem historycznym, bez akcji.
@@ -488,7 +475,8 @@ function ContentRow({
       // widoczności. Kolejka (needs_review) zostaje z własnym Publikuj/Ukryj —
       // to inny przepływ (moderacja pre-publikacji), nietknięty.
       kebab = [
-        { label: "Edytuj punkt", onClick: () => onEdit({ p }) },
+        { label: "Karta punktu", onClick: () => openCard(p.pointId) },
+        { label: "Edytuj punkt", onClick: () => openEdit(p.pointId, reload) },
         ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
         ...(isPanelPoint ? [] : blockActions(p.authorUid, p.authorName, blocked, undefined,
           opisInny ? "Zablokuj autora punktu" : undefined)),
@@ -522,13 +510,14 @@ function ContentRow({
         </div>
       );
       kebab = [
+        { label: "Karta punktu", onClick: () => openCard(c.pointId) },
         ...(c.state !== "approved"
           ? [{ label: "Opublikuj komentarz", onClick: () => act({ action: "approveComment", pointId: c.pointId, commentId: c.commentId }, "Opublikowano", reload) }]
           : []),
         ...(c.status !== "removed"
           ? [{
               label: "Ukryj komentarz",
-              onClick: () => confirmHide("komentarz") && act({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "Ukryto", reload),
+              onClick: () => actHide({ action: "rejectComment", pointId: c.pointId, commentId: c.commentId }, "komentarz", "Ukryto", reload),
             }]
           : []),
         ...(parent && mapLink(parent.lat, parent.lon) ? [{ label: "Pokaż na mapie", href: mapLink(parent.lat, parent.lon)! }] : []),
@@ -571,21 +560,20 @@ function ContentRow({
       );
       state = <ReportStatusBadge r={r} />;
       if (isOpenReport) {
-        const closeActioned = () =>
-          act({ action: "closeReport", reportId: r.id, resolution: "actioned" }, "Zgłoszenie zamknięte", reload);
+        const reportTarget = { pointId: r.pointId, commentId: r.commentId };
+        const closeActioned = () => closeTargetReports(reportTarget, "actioned", {}, reload);
         const c = target && r.target === "comment" ? (target as CommentItem) : null;
         const p = target && r.target !== "comment" ? (target as DescriptionItem) : null;
         const hidden = target?.state === "rejected";
         kebab = [
+          { label: "Karta punktu", onClick: () => openCard(r.pointId) },
           ...(c
             ? [
                 hidden
                   ? { label: "Opublikuj komentarz", onClick: () => act({ action: "approveComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz opublikowany", closeActioned) }
                   : {
                       label: "Ukryj komentarz",
-                      onClick: () =>
-                        confirmHide("komentarz") &&
-                        act({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "Komentarz ukryty", closeActioned),
+                      onClick: () => actHide({ action: "rejectComment", pointId: r.pointId, commentId: r.commentId! }, "komentarz", "Komentarz ukryty", closeActioned),
                     },
                 // Etykieta mówi KOGO, bo kolumna „Autor" pokazuje tu zgłaszającego.
                 ...blockActions(c.authorUid, c.authorName, blocked, undefined, "Zablokuj autora komentarza"),
@@ -595,7 +583,7 @@ function ContentRow({
             ? [
                 // Opublikuj/Ukryj opis usunięte tu też — edycja punktu zamyka
                 // zgłoszenie przez onSaved, więc alternatywna droga zostaje.
-                { label: "Edytuj punkt", onClick: () => onEdit({ p, onSaved: closeActioned }) },
+                { label: "Edytuj punkt", onClick: () => openEdit(r.pointId, closeActioned) },
                 ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
                 // Parytet z wierszem opisu: autora da się zablokować także z
                 // poziomu zgłoszenia (chyba że to wpis panelu). ⛔ Zgłoszenie
@@ -613,23 +601,17 @@ function ContentRow({
                         ? blockActions(a.uid, a.name, blocked, undefined, "Zablokuj autora opisu")
                         : blockActions(p.authorUid, p.authorName, blocked, undefined, "Zablokuj autora punktu");
                     })()),
-                { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(r.pointId, p.name ?? "", closeActioned) },
+                { label: "Usuń punkt", variant: "destructive" as const, onClick: () => actDeletePoint(r.pointId, p.name ?? "", () => closeTargetReports({ pointId: r.pointId }, "actioned", { includeComments: true }, reload)) },
               ]
             : []),
-          {
-            label: "Odrzuć zgłoszenie",
-            // Zamknięcia (dismissed) nie da się cofnąć z panelu (brak akcji
-            // „otwórz ponownie") — potwierdzenie na modalu.
-            onClick: () => {
-              if (window.confirm("Odrzucić zgłoszenie jako niezasadne? Treść zostaje bez zmian, zgłoszenia nie da się potem ponownie otworzyć z panelu.")) {
-                act({ action: "closeReport", reportId: r.id, resolution: "dismissed" }, "Zgłoszenie odrzucone (niezasadne)", reload);
-              }
-            },
-          },
+          { label: "Odrzuć zgłoszenie", onClick: () => actDismissReports(reportTarget, reload) },
         ];
       } else {
         const parent = pointById.get(r.pointId);
-        kebab = parent && mapLink(parent.lat, parent.lon) ? [{ label: "Pokaż na mapie", href: mapLink(parent.lat, parent.lon)! }] : [];
+        kebab = [
+          { label: "Karta punktu", onClick: () => openCard(r.pointId) },
+          ...(parent && mapLink(parent.lat, parent.lon) ? [{ label: "Pokaż na mapie", href: mapLink(parent.lat, parent.lon)! }] : []),
+        ];
       }
       historyPointId = r.pointId;
       historyCommentId = r.commentId;
