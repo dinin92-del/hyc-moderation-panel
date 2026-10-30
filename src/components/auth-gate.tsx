@@ -87,7 +87,7 @@ export function AuthGate({
     <div className="grid min-h-screen place-items-center bg-muted/30 px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-3">
-          <CardTitle>Panel moderatora — Hyc do Budy</CardTitle>
+          <CardTitle>Panel moderatora Hyc do Budy</CardTitle>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Kontekst danych</span>
             <EnvSwitch />

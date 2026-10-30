@@ -1,11 +1,38 @@
 // Etykiety PL — lustro lib/core/models/report.dart + point_doc.dart z apki.
 
+// Opis wpisu dziennika moderacji. Wpisy filtra i decyzje o treści mają tylko stan.
+export const LOG_TARGET_LABEL: Record<string, string> = {
+  comment: "Komentarz",
+  description: "Opis",
+  "point-create": "Dodanie punktu",
+  "point-edit": "Edycja punktu",
+  "point-delete": "Usunięcie punktu",
+  "point-suppress": "Usunięcie punktu",
+  "point-restore": "Przywrócenie punktu",
+  "user-block": "Blokada konta",
+};
+
+export const FIELD_LABEL: Record<string, string> = {
+  name: "nazwa",
+  description: "opis",
+  type: "kategoria",
+  phone: "telefon",
+  lat: "pozycja",
+  lon: "pozycja",
+};
+
 export const STATE_LABEL: Record<string, string> = {
   approved: "Zatwierdzony",
   rejected: "Odrzucony",
   needs_review: "Do sprawdzenia",
   pending: "Oczekuje",
+  edited: "Edycja",
   reviewing: "W weryfikacji",
+  suppressed: "Usunięty",
+  removed: "Usunięty",
+  restored: "Przywrócony",
+  blocked: "Zablokowany",
+  unblocked: "Odblokowany",
 };
 
 // Kolor semantyczny stanu: zielony=ok, amber=czeka, czerwony=źle.
@@ -50,7 +77,7 @@ export const FLAG_LABEL: Record<string, string> = {
   zly_opis: "Niewłaściwy opis",
   bledne_dane: "Błędne dane",
   spam_falszywy: "Spam / fałszywy / reklama",
-  kiepskie_zdjecia: "Zdjęcia kiepskie lub niepomocne",
+  kiepskie_zdjecia: "Nieodpowiednie zdjęcie",
   inne: "Inne",
 };
 
@@ -67,14 +94,32 @@ export const CATEGORY_LABEL: Record<string, string> = {
   inne: "Inne",
 };
 
-// Etykiety werdyktu AI w wierszu kolejki (moderation.labels[]). Bazują na tych
-// samych kategoriach co zgłoszenia + techniczne `ai_error` (eskalacja po błędzie
-// Gemini). Nieznana etykieta → surowa wartość (nie gubimy sygnału).
+// Etykiety werdyktu filtra w wierszu kolejki (moderation.labels[]). Filtr regułowy
+// `rules-v4` + kategorie zgłoszeń + techniczne `ai_error`. Nieznana etykieta →
+// surowa wartość (nie gubimy sygnału).
 const AI_LABEL_EXTRA: Record<string, string> = {
-  ai_error: "Błąd AI — eskalacja",
+  ai_error: "Błąd filtra",
+  hejt: "Hejt",
+  wulgaryzm: "Wulgaryzm",
+  grozba: "Groźba",
+  telefon: "Numer telefonu",
+  link_reklama: "Link lub reklama",
+  gibberish: "Bełkot",
+  jakosc: "Niska jakość",
 };
 export function aiLabel(l: string): string {
   return AI_LABEL_EXTRA[l] ?? CATEGORY_LABEL[l] ?? FLAG_LABEL[l] ?? l;
+}
+
+/** Wiek zgłoszenia w kolejce: „3 dni", „5 godz.", „12 min". */
+export function fmtAge(ms: number | null, now: number): string {
+  if (!ms) return "—";
+  const min = Math.max(0, Math.floor((now - ms) / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} godz.`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "1 dzień" : `${d} dni`;
 }
 
 export function fmtDate(ms: number | null): string {

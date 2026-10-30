@@ -48,13 +48,13 @@ export function EnvBanner() {
   if (ACTIVE_ENV === "dev") {
     return (
       <div className="border-b bg-neutral-50 px-6 py-1.5 text-center text-xs text-neutral-500">
-        Kontekst <strong className="text-neutral-700">DEV</strong> — projekt testowy hyc-do-budy-dev. Zmiany nie dotykają produkcji.
+        Kontekst <strong className="text-neutral-700">DEV</strong>: projekt testowy hyc-do-budy-dev. Zmiany nie dotykają produkcji.
       </div>
     );
   }
   return (
     <div className="border-b bg-neutral-50 px-6 py-1.5 text-center text-xs text-neutral-500">
-      Kontekst <strong className="text-neutral-700">PROD</strong> — prawdziwe komentarze użytkowników. Decyzje wpływają na aplikację.
+      Kontekst <strong className="text-neutral-700">PROD</strong>: prawdziwe komentarze użytkowników. Decyzje wpływają na aplikację.
     </div>
   );
 }
