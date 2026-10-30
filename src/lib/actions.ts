@@ -140,7 +140,7 @@ export function closeTargetReports(
 export async function actDismissReports(target: ReportTarget, after?: () => void) {
   const ok = await confirmDialog({
     title: "Odrzucić zgłoszenia?",
-    body: "Treść zostaje bez zmian, a zgłaszający dostanie maila z tą decyzją. " +
+    body: "Treść zostaje bez zmian. Zgłaszający dostanie maila z tą decyzją, jeśli ma adres na koncie. " +
       "Zamkniętego zgłoszenia nie da się otworzyć ponownie.",
     confirmLabel: "Odrzuć zgłoszenia",
     reason: REASON_FIELD,

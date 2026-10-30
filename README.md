@@ -34,3 +34,15 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Kontrakt z backendem
+
+Panel czyta Firestore klientem, a zapisuje wyłącznie przez callable w regionie `europe-central2`. Punkt z bazy zwykle nie ma dokumentu `points/{id}`, więc jego dane przychodzą z callable, nie z Firestore.
+
+- `moderatorSearchPoints`: wyszukiwarka zakładki Punkty po całej bazie. Tekst, id, telefon, autor albo `near`, do tego `type` i `view` (`all`, `suppressed`, `ugc`, `edited`).
+- `moderatorLookupPoints`: nazwa i typ punktu z bazy po CID. Panel łączy zapytania w paczkę.
+- `onModeratorEditPoint`: edycja także punktu bez dokumentu, zakłada nakładkę. Pozycji punktu z bazy nie zmienia.
+- `onModeratorDeletePoint` i `onModeratorRestorePoint`: punkt z bazy dostaje tombstone w `suppressedPoints/{cid}` i da się go przywrócić, przywrócenie wymaga powodu (min. 25 znaków). Punkt UGC znika na stałe.
+- `onModeratorDecision` z akcją `closeReportsForTarget`: zamyka wszystkie zgłoszenia celu. Zamknięcie zgłoszenia wysyła zgłaszającemu mail z decyzją (trigger `onReportResolved`).
+
+Kartę punktu otwiera parametr `?punkt=<id>` w adresie, więc link do punktu można przekazać innemu moderatorowi. Deploy: najpierw funkcje, potem panel, bo panel woła nowe callable.
