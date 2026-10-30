@@ -27,7 +27,7 @@ export function BlockedProvider({ children }: { children: React.ReactNode }) {
     () => {
       setError("Nie udało się wczytać listy zablokowanych.");
       setRows([]);
-      toast.error("Błąd listy zablokowanych — status „zablokowany” może być nieaktualny.");
+      toast.error("Błąd listy zablokowanych. Status „zablokowany” może być nieaktualny.");
     },
   ), []);
   const value = useMemo<BlockedState>(

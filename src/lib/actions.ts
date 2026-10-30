@@ -58,7 +58,7 @@ export async function actHide(
 // Wymaga authorUid; przy braku (starsze dokumenty) informuje zamiast cicho paść.
 export async function actBlock(targetUid: string, authorName: string, after?: () => void) {
   if (!targetUid) {
-    toast.error("Brak identyfikatora autora — nie można zablokować.");
+    toast.error("Brak identyfikatora autora, nie można zablokować.");
     return;
   }
   const ok = await confirmDialog({

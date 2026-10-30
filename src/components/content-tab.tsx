@@ -279,7 +279,7 @@ export function ContentTab() {
 
       <Section title="Wszystkie treści" count={visible.length}>
         {visible.length === 0 ? (
-          <Empty text="Nic tu nie ma — zmień filtr albo wyszukiwanie." />
+          <Empty text="Nic tu nie ma. Zmień filtr albo wyszukiwanie." />
         ) : (
           <Table className="table-fixed">
             <TableHeader>
@@ -341,7 +341,7 @@ export function ContentTab() {
         )}
         {truncated && (
           <div className="flex items-center justify-between gap-3 border-t bg-amber-50 px-4 py-2 text-xs text-amber-700">
-            <span>⚠ Pobrano pierwsze {fetchTake} z każdej listy (punkty/opisy, komentarze, zgłoszenia) — może być więcej na serwerze.</span>
+            <span>⚠ Pobrano pierwsze {fetchTake} z każdej listy (punkty/opisy, komentarze, zgłoszenia), więc może być więcej na serwerze.</span>
             <Button
               variant="outline"
               size="sm"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, EyeOff, Pencil, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, EyeOff, Image as ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -296,7 +296,7 @@ export function QueueReports({ items, error, hideTest }: { items: ReportItem[]; 
               <TableHead className="w-56">Cel</TableHead>
               <TableHead>Co zgłoszono</TableHead>
               <TableHead className="w-20">Czeka</TableHead>
-              <TableHead className="w-96 text-right">Akcje</TableHead>
+              <TableHead className="w-[30rem] text-right">Akcje</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -387,6 +387,10 @@ function ReportRow({ group, now }: { group: ReportGroup; now: number }) {
   );
 }
 
+// Główna akcja wiersza wynika z tego, co zgłoszono. Reszta zostaje w zasięgu ręki.
+const DELETE_FLAGS = new Set(["nie_istnieje", "zrujnowane"]);
+const EDIT_FLAGS = new Set(["zla_kategoria", "zly_opis", "bledne_dane"]);
+
 // Akcje zgłoszenia działają na doładowanym w tle `target` i domykają zgłoszenia
 // wszystkich osób o ten cel. „Odrzuć zgłoszenie" działa zawsze, także bez celu.
 function ReportActions({ group, target, isComment }: { group: ReportGroup; target: CommentItem | DescriptionItem | null | undefined; isComment: boolean }) {
@@ -397,6 +401,9 @@ function ReportActions({ group, target, isComment }: { group: ReportGroup; targe
   const p = target && !isComment ? (target as DescriptionItem) : null;
   const hidden = target?.state === "rejected"; // ukryty w aplikacji
   const closeActioned = () => closeTargetReports({ pointId, commentId }, "actioned");
+  const flags = group.reports.map((r) => r.flag);
+  const deleteFirst = flags.some((f) => f && DELETE_FLAGS.has(f));
+  const editFirst = !deleteFirst && flags.some((f) => f && EDIT_FLAGS.has(f));
 
   const kebab: KebabAction[] = [
     { label: "Karta punktu", onClick: () => openCard(pointId) },
@@ -440,14 +447,27 @@ function ReportActions({ group, target, isComment }: { group: ReportGroup; targe
       ))}
       {p && (
         <>
-          <Button size="sm" variant="outline" className="h-7 gap-1 px-2" onClick={() => openEdit(pointId, closeActioned)}>
+          {flags.includes("kiepskie_zdjecia") && (
+            <Button size="sm" className="h-7 gap-1 px-2" onClick={() => openCard(pointId)}>
+              <ImageIcon className="h-3.5 w-3.5" />
+              Zdjęcia punktu
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant={editFirst ? "default" : "outline"}
+            className="h-7 gap-1 px-2"
+            onClick={() => openEdit(pointId, closeActioned)}
+          >
             <Pencil className="h-3.5 w-3.5" />
             Edytuj punkt
           </Button>
           <Button
             size="sm"
             variant="outline"
-            className="h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:bg-red-600/10 dark:text-red-500"
+            className={deleteFirst
+              ? "h-7 gap-1 border-red-600 bg-red-600 px-2 text-white hover:bg-red-700 hover:text-white"
+              : "h-7 gap-1 border-red-600/40 px-2 text-red-700 hover:bg-red-600/10 dark:text-red-500"}
             onClick={() => actDeletePoint(pointId, p.name, () =>
               closeTargetReports({ pointId }, "actioned", { includeComments: true }))}
           >

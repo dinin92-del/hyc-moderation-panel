@@ -26,6 +26,7 @@ import { SHELTER_TYPE_LABEL, TAXONOMY_OPTIONS } from "@/lib/taxonomy";
 
 const SEARCH_DELAY_MS = 350;
 const ALL_TYPES = "__all";
+const TYPE_ITEMS = { ...SHELTER_TYPE_LABEL, [ALL_TYPES]: "Każda kategoria" };
 
 const VIEWS: { value: PointView; label: string }[] = [
   { value: "all", label: "Wszystkie" },
@@ -94,9 +95,9 @@ export function PointsTab() {
           className="h-9 min-w-72 flex-1"
           autoFocus
         />
-        <Select value={type} onValueChange={(v) => setType(v ?? ALL_TYPES)}>
+        <Select items={TYPE_ITEMS} value={type} onValueChange={(v) => setType(v ?? ALL_TYPES)}>
           <SelectTrigger className="w-56">
-            <SelectValue>{(v: string) => (v === ALL_TYPES ? "Każda kategoria" : SHELTER_TYPE_LABEL[v] ?? v)}</SelectValue>
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_TYPES}>Każda kategoria</SelectItem>

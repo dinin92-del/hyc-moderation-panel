@@ -23,8 +23,17 @@ import {
   type PointEditFields,
 } from "@/lib/moderation";
 import { PL_BBOX, mapLink, parseLatLon, toNumber } from "@/lib/coords";
-import { TAXONOMY_OPTIONS } from "@/lib/taxonomy";
+import { SHELTER_TYPE_LABEL, TAXONOMY_OPTIONS } from "@/lib/taxonomy";
 import { formatPhoneDisplay } from "@/lib/phone";
+
+const DUPLICATE_WHY: Record<string, string> = {
+  osm: "ten sam obiekt OSM",
+  spot: "to samo miejsce",
+  telefon: "ten sam telefon",
+  domena: "ta sama strona",
+  rdzen: "ta sama nazwa",
+  podobienstwo: "podobna nazwa",
+};
 
 // Podgląd numeru w kształcie, w jakim wyrenderuje go apka. Pole zostaje SUROWE —
 // panel niczego nie przepisuje w bazie, bo numer pochodzi ze źródła (OSM, rejestr)
@@ -102,7 +111,7 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">Kategoria</span>
-          <Select value={type} onValueChange={(v) => setType(v ?? "")}>
+          <Select items={SHELTER_TYPE_LABEL} value={type} onValueChange={(v) => setType(v ?? "")}>
             <SelectTrigger><SelectValue placeholder="Wybierz typ" /></SelectTrigger>
             <SelectContent>
               {TAXONOMY_OPTIONS.map(([code, label]) => (
@@ -168,7 +177,7 @@ export function PointEditDialog({ point, onClose, onSaved }: { point: Descriptio
     <Dialog open={point !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
       {point && (
         <DialogContent>
-          <DialogTitle>Edytuj punkt — {point.name || point.pointId}</DialogTitle>
+          <DialogTitle>Edytuj punkt: {point.name || point.pointId}</DialogTitle>
           <PointEditForm point={point} onDone={onClose} onSaved={onSaved} />
         </DialogContent>
       )}
@@ -228,7 +237,7 @@ function AddPointForm() {
     setSaving(true);
     try {
       await createPoint(fields, force);
-      toast.success("Punkt dodany — widoczny w apce");
+      toast.success("Punkt dodany, widoczny w apce");
       // Treść czyścimy, kategorię zostawiamy pod kolejny punkt z serii.
       // Telefon też czyścimy — numer jest per-punkt, nie per-seria.
       setName("");
@@ -250,7 +259,7 @@ function AddPointForm() {
     <div>
         <p className="mb-3 text-xs text-muted-foreground">
           Punkt trafia do bazy jako wpis moderatora (podpis „Zespół Hyc!”) i jest widoczny
-          w aplikacji od razu — bez kolejki moderacji. Opis jest opcjonalny; bez niego apka
+          w aplikacji od razu, bez kolejki moderacji. Opis jest opcjonalny; bez niego apka
           pokaże przy punkcie zaproszenie „Zostań pionierem”.
         </p>
         <div className="space-y-3">
@@ -265,7 +274,7 @@ function AddPointForm() {
             </label>
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">Kategoria *</span>
-              <Select value={type} onValueChange={(v) => setType(v ?? "")}>
+              <Select items={SHELTER_TYPE_LABEL} value={type} onValueChange={(v) => setType(v ?? "")}>
                 <SelectTrigger><SelectValue placeholder="Wybierz kategorię" /></SelectTrigger>
                 <SelectContent>
                   {TAXONOMY_OPTIONS.map(([code, label]) => (
@@ -282,7 +291,7 @@ function AddPointForm() {
               <Input
                 value={lat}
                 inputMode="decimal"
-                placeholder="49.412 — można wkleić parę albo link z mapy"
+                placeholder="49.412, można wkleić parę albo link z mapy"
                 onChange={(e) => { if (!onLatPaste(e.target.value)) setLat(e.target.value); }}
               />
             </label>
@@ -297,11 +306,11 @@ function AddPointForm() {
             </label>
           </div>
           {lat.trim() !== "" && lon.trim() !== "" && !coordsOk && (
-            <p className="text-xs text-red-600">Współrzędne nieprawidłowe — sprawdź liczby.</p>
+            <p className="text-xs text-red-600">Współrzędne nieprawidłowe, sprawdź liczby.</p>
           )}
           {outsidePl && (
             <p className="text-xs text-amber-600">
-              Uwaga: punkt leży poza Polską i pasem 50 km — czy szerokość z długością nie są
+              Uwaga: punkt leży poza Polską i pasem 50 km. Czy szerokość z długością nie są
               zamienione miejscami?
             </p>
           )}
@@ -322,7 +331,7 @@ function AddPointForm() {
               className="min-h-24 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Co user zastanie na miejscu"
+              placeholder="Co turysta zastanie na miejscu"
             />
           </label>
 
@@ -343,7 +352,7 @@ function AddPointForm() {
               <ul className="mt-1 list-inside list-disc text-xs">
                 {duplicates.slice(0, 5).map((d, i) => (
                   <li key={d.id ?? i}>
-                    {d.name || "(bez nazwy)"}, {d.dist_m} m ({d.why})
+                    {d.name || "(bez nazwy)"}, {d.dist_m} m ({DUPLICATE_WHY[d.why] ?? d.why})
                   </li>
                 ))}
               </ul>

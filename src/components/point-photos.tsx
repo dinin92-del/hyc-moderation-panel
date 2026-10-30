@@ -60,7 +60,7 @@ function PhotoTile({ f, onRemove }: { f: PhotoItem; onRemove: (f: PhotoItem) => 
         {/* eslint-disable-next-line @next/next/no-img-element -- thumb z R2, bez optymalizatora Nexta */}
         <img
           src={f.thumbUrl}
-          alt={`Zdjęcie — ${f.authorName || "Użytkownik"}`}
+          alt={`Zdjęcie: ${f.authorName || "Użytkownik"}`}
           className="h-28 w-28 rounded border object-cover"
           loading="lazy"
         />

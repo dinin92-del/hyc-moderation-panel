@@ -13,12 +13,14 @@ function Dialog({ ...props }: DialogPrimitive.Root.Props) {
 function DialogContent({
   className,
   children,
+  onBackdropClick,
   ...props
-}: DialogPrimitive.Popup.Props) {
+}: DialogPrimitive.Popup.Props & { onBackdropClick?: () => void }) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
         data-slot="dialog-backdrop"
+        onClick={onBackdropClick}
         className="fixed inset-0 z-50 bg-black/50 transition-opacity duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0"
       />
       <DialogPrimitive.Popup

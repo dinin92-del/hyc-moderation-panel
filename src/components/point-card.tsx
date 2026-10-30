@@ -239,9 +239,10 @@ function PointCard({ pointId, onClose }: { pointId: string; onClose: () => void 
 
   return (
     // modal={false}: edycja i potwierdzenie to osobne okna nad kartą. Pułapka fokusu
-    // karty zabierałaby im klawiaturę, a klik w nie zamykałby kartę.
+    // karty zabierałaby im klawiaturę, a klik w nie zamykałby kartę. Dlatego zamykanie
+    // kliknięciem poza kartą idzie tylko przez jej własne tło.
     <Dialog open modal={false} disablePointerDismissal onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="left-auto right-0 top-0 h-full max-h-full w-full max-w-3xl translate-x-0 translate-y-0 rounded-none border-y-0 border-r-0 data-[ending-style]:scale-100 data-[starting-style]:scale-100">
+      <DialogContent onBackdropClick={onClose} className="left-auto right-0 top-0 h-full max-h-full w-full max-w-3xl translate-x-0 translate-y-0 rounded-none border-y-0 border-r-0 data-[ending-style]:scale-100 data-[starting-style]:scale-100">
         {error ? (
           <>
             <DialogTitle>Karta punktu</DialogTitle>
