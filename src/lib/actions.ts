@@ -46,7 +46,9 @@ export async function actHide(
 ) {
   const ok = await confirmDialog({
     title: `Ukryć ${what}?`,
-    body: "Zniknie z aplikacji. Można go opublikować ponownie.",
+    body: input.action === "rejectDescription"
+      ? "Zniknie z aplikacji. Można go opublikować ponownie, ale telefon czekający razem z nim przepada."
+      : "Zniknie z aplikacji. Można go opublikować ponownie.",
     confirmLabel: "Ukryj",
     destructive: true,
     reason: REASON_FIELD,
@@ -117,7 +119,7 @@ export async function actUnblock(targetUid: string, after?: () => void) {
     () => unblockUser(targetUid, ok.reason), after);
 }
 
-type ReportTarget = { pointId: string; commentId?: string | null };
+type ReportTarget = { pointId: string; commentId?: string | null; target?: string };
 
 /** Zamyka zgłoszenia wszystkich osób o ten cel. Dla komentarza tylko o ten komentarz. */
 export function closeTargetReports(
@@ -126,11 +128,14 @@ export function closeTargetReports(
   extra: { reason?: string; includeComments?: boolean } = {},
   after?: () => void,
 ) {
-  const okMsg = resolution === "actioned" ? "Zgłoszenia zamknięte" : "Zgłoszenia odrzucone";
+  const okMsg = resolution === "actioned"
+    ? "Zgłoszenia zamknięte, zgłaszający dostanie maila"
+    : "Zgłoszenia odrzucone";
   return act({
     action: "closeReportsForTarget",
     pointId: target.pointId,
     commentId: target.commentId ?? undefined,
+    target: target.target,
     resolution,
     ...extra,
   }, okMsg, after);

@@ -584,6 +584,8 @@ type DecisionInput = {
   reason?: string;
   /** `closeReportsForTarget`: także zgłoszenia komentarzy tego punktu. */
   includeComments?: boolean;
+  /** `closeReportsForTarget`: tylko zgłoszenia tego rodzaju (punkt, opis, komentarz). */
+  target?: string;
 };
 
 export async function decide(input: DecisionInput): Promise<void> {
@@ -629,9 +631,9 @@ export async function editPoint(
   pointId: string,
   fields: PointEditFields,
   reason?: string,
-): Promise<void> {
-  const fn = httpsCallable(functions, "onModeratorEditPoint");
-  await fn({ pointId, fields, reason });
+): Promise<string | null> {
+  const fn = httpsCallable<unknown, { state: string | null }>(functions, "onModeratorEditPoint");
+  return (await fn({ pointId, fields, reason })).data.state;
 }
 
 // ── Ręczne dodanie punktu (callable onModeratorCreatePoint) ──────────────────
@@ -825,8 +827,10 @@ export async function fetchCommentById(pointId: string, commentId: string): Prom
 export async function fetchDescriptionById(pointId: string): Promise<DescriptionItem | null> {
   const [snap, base] = await Promise.all([
     getDoc(doc(db, "points", pointId)),
-    fetchPointBase(pointId),
+    // Awaria indeksu nie może zabrać karty punktu, który ma dokument.
+    fetchPointBase(pointId).catch(() => undefined),
   ]);
+  if (base === undefined && !snap.exists()) throw new Error("nie udało się odczytać bazy punktów");
   if (!snap.exists() && !base) return null;
   const mapped = mapDescription(snap.exists() ? snap.data() : {}, pointId);
   if (!base) {

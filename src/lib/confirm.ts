@@ -14,6 +14,7 @@ export type ConfirmRequest = ConfirmOptions & {
 };
 
 let show: ((request: ConfirmRequest) => void) | null = null;
+let pending: ConfirmRequest["resolve"] | null = null;
 
 export function registerConfirmHost(fn: ((request: ConfirmRequest) => void) | null) {
   show = fn;
@@ -23,6 +24,9 @@ export function registerConfirmHost(fn: ((request: ConfirmRequest) => void) | nu
 export function confirmDialog(options: ConfirmOptions): Promise<{ reason: string } | null> {
   return new Promise((resolve) => {
     if (!show) throw new Error("Brak ConfirmHost w drzewie komponentów");
+    // Nowy dialog zastępuje stary, a jego wywołujący nie może czekać w nieskończoność.
+    pending?.(null);
+    pending = resolve;
     show({ ...options, resolve });
   });
 }

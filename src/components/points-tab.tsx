@@ -66,6 +66,7 @@ export function PointsTab() {
     let alive = true;
     const timer = setTimeout(() => {
       setLoading(true);
+      setError(null);
       searchPoints(toInput(text, type, view))
         .then((r) => {
           if (!alive) return;
@@ -81,6 +82,7 @@ export function PointsTab() {
     };
   }, [idle, text, type, view]);
 
+  const searching = !idle && loading;
   const hits = idle ? [] : result?.hits ?? [];
   const total = idle ? 0 : result?.total ?? 0;
   const showDistance = hits.some((h) => h.distanceM !== undefined);
@@ -109,13 +111,13 @@ export function PointsTab() {
         <FilterChips<PointView> value={view} onChange={setView} options={VIEWS} />
       </div>
 
-      <Section title={loading ? "Szukam…" : "Punkty"} count={total}>
-        {error ? (
+      <Section title={searching ? "Szukam…" : "Punkty"} count={total}>
+        {error && !idle ? (
           <QueueError message={`Nie udało się wyszukać: ${error}`} />
         ) : idle ? (
           <Empty text="Wpisz nazwę, id, numer telefonu, autora albo wklej współrzędne. Szukamy w całej bazie." />
         ) : hits.length === 0 ? (
-          <Empty text={loading ? "Szukam…" : "Nic nie znaleziono."} />
+          <Empty text={searching ? "Szukam…" : "Nic nie znaleziono."} />
         ) : (
           <Table className="table-fixed">
             <TableHeader>

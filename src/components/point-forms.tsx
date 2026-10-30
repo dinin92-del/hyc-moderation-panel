@@ -91,8 +91,10 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
     if (Object.keys(fields).length === 0) return toast("Brak zmian do zapisania");
     setSaving(true);
     try {
-      await editPoint(point.pointId, fields, reason.trim());
-      toast.success("Punkt zaktualizowany");
+      const state = await editPoint(point.pointId, fields, reason.trim());
+      toast.success(state && state !== "approved"
+        ? "Zapisano. W aplikacji pojawi się po decyzji o opisie"
+        : "Punkt zaktualizowany");
       onSaved?.();
       onDone();
     } catch (e) {
@@ -204,8 +206,11 @@ function AddPointForm() {
   const [description, setDescription] = useState("");
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
-  // Kolizje z ostatniej próby. Dodanie mimo nich wymaga świadomego kliknięcia.
-  const [duplicates, setDuplicates] = useState<DuplicateHit[] | null>(null);
+  // Kolizje z ostatniej próby. Dodanie mimo nich wymaga świadomego kliknięcia i
+  // obowiązuje tylko dla tych samych pól, inaczej obeszłoby bramkę po zmianie miejsca.
+  const [dupCheck, setDupCheck] = useState<{ key: string; hits: DuplicateHit[] } | null>(null);
+  const dupKey = JSON.stringify([name, type, lat, lon, phone]);
+  const duplicates = dupCheck?.key === dupKey ? dupCheck.hits : null;
 
   // Wklejenie pary („49.412, 20.712" lub link z mapy) w pole szerokości rozbija
   // się na oba pola — przy przepisywaniu z listy to najczęstszy ruch.
@@ -245,10 +250,10 @@ function AddPointForm() {
       setLon("");
       setDescription("");
       setPhone("");
-      setDuplicates(null);
+      setDupCheck(null);
     } catch (e) {
       const hits = duplicatesOf(e);
-      if (hits) setDuplicates(hits);
+      if (hits) setDupCheck({ key: dupKey, hits });
       else toast.error("Nie udało się dodać: " + (e instanceof Error ? e.message : "błąd"));
     } finally {
       setSaving(false);

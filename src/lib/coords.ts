@@ -19,14 +19,16 @@ export function toNumber(v: string): number {
 export function parseLatLon(raw: string): { lat: number; lon: number } | null {
   const s = raw.trim();
   if (!s) return null;
+  const inRange = (lat: number, lon: number) =>
+    Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
   const g = s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) ?? s.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
-  if (g) return { lat: Number(g[1]), lon: Number(g[2]) };
+  if (g) return inRange(Number(g[1]), Number(g[2]));
   const mx = s.match(/[?&]x=(-?\d+\.\d+)/);
   const my = s.match(/[?&]y=(-?\d+\.\d+)/);
-  if (mx && my) return { lat: Number(my[1]), lon: Number(mx[1]) }; // mapy.cz: x=lon, y=lat
+  if (mx && my) return inRange(Number(my[1]), Number(mx[1])); // mapy.cz: x=lon, y=lat
   const parts = /[\s;]/.test(s) ? s.split(/[\s;]+/) : s.split(",");
   if (parts.length !== 2) return null;
-  const lat = toNumber(parts[0]);
-  const lon = toNumber(parts[1]);
-  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+  // Bez części dziesiętnej to nie współrzędne, tylko np. „602 123" z numeru telefonu.
+  if (!parts.every((part) => /^-?\d+[.,]\d+,?$/.test(part))) return null;
+  return inRange(toNumber(parts[0]), toNumber(parts[1]));
 }

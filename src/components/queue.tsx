@@ -400,7 +400,8 @@ function ReportActions({ group, target, isComment }: { group: ReportGroup; targe
   const c = target && isComment ? (target as CommentItem) : null;
   const p = target && !isComment ? (target as DescriptionItem) : null;
   const hidden = target?.state === "rejected"; // ukryty w aplikacji
-  const closeActioned = () => closeTargetReports({ pointId, commentId }, "actioned");
+  const reportTarget = { pointId, commentId, target: group.target };
+  const closeActioned = () => closeTargetReports(reportTarget, "actioned");
   const flags = group.reports.map((r) => r.flag);
   const deleteFirst = flags.some((f) => f && DELETE_FLAGS.has(f));
   const editFirst = !deleteFirst && flags.some((f) => f && EDIT_FLAGS.has(f));
@@ -481,10 +482,21 @@ function ReportActions({ group, target, isComment }: { group: ReportGroup; targe
         variant="outline"
         className="h-7 px-2"
         title="Zgłoszenie bez podstaw, treść zostaje bez zmian"
-        onClick={() => actDismissReports({ pointId, commentId })}
+        onClick={() => actDismissReports(reportTarget)}
       >
         Odrzuć zgłoszenie
       </Button>
+      {hidden && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          title="Treść jest już ukryta, np. z karty punktu"
+          onClick={closeActioned}
+        >
+          Zamknij jako załatwione
+        </Button>
+      )}
       <KebabMenu actions={kebab} />
     </div>
   );

@@ -560,7 +560,7 @@ function ContentRow({
       );
       state = <ReportStatusBadge r={r} />;
       if (isOpenReport) {
-        const reportTarget = { pointId: r.pointId, commentId: r.commentId };
+        const reportTarget = { pointId: r.pointId, commentId: r.commentId, target: r.target };
         const closeActioned = () => closeTargetReports(reportTarget, "actioned", {}, reload);
         const c = target && r.target === "comment" ? (target as CommentItem) : null;
         const p = target && r.target !== "comment" ? (target as DescriptionItem) : null;
