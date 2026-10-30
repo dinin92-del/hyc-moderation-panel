@@ -26,6 +26,7 @@ export const STATE_LABEL: Record<string, string> = {
   rejected: "Odrzucony",
   needs_review: "Do sprawdzenia",
   pending: "Oczekuje",
+  edited: "Edycja",
   reviewing: "W weryfikacji",
   suppressed: "Usunięty",
   removed: "Usunięty",
