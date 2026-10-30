@@ -129,7 +129,7 @@ export function closeTargetReports(
   after?: () => void,
 ) {
   const okMsg = resolution === "actioned"
-    ? "Zgłoszenia zamknięte, zgłaszający dostanie maila"
+    ? "Zgłoszenia zamknięte, zgłaszający z potwierdzonym adresem dostanie maila"
     : "Zgłoszenia odrzucone";
   return act({
     action: "closeReportsForTarget",

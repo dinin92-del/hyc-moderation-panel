@@ -258,7 +258,7 @@ export type ReportGroup = {
 function groupReports(items: ReportItem[]): ReportGroup[] {
   const groups = new Map<string, ReportGroup>();
   for (const r of items) {
-    const key = `${r.pointId}/${r.commentId ?? ""}`;
+    const key = `${r.pointId}/${r.commentId ?? ""}/${r.target}`;
     const g = groups.get(key);
     if (g) {
       g.reports.push(r);

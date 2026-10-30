@@ -92,7 +92,10 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
     setSaving(true);
     try {
       const state = await editPoint(point.pointId, fields, reason.trim());
-      toast.success(state && state !== "approved"
+      // Telefon nie czeka na opis, reszta poprawek w apce wymaga zatwierdzonego stanu.
+      const waits = (state ?? point.state) !== "approved" && !!point.description &&
+        Object.keys(fields).some((k) => k !== "phone");
+      toast.success(waits
         ? "Zapisano. W aplikacji pojawi się po decyzji o opisie"
         : "Punkt zaktualizowany");
       onSaved?.();
