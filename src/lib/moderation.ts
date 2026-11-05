@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "./firebase";
+import { withAssetBase } from "./point-attrs";
 
 export type ModState =
   | "pending"
@@ -823,29 +824,6 @@ export async function fetchCommentById(pointId: string, commentId: string): Prom
 }
 
 /**
- * Czy nazwa i typ z dokumentu wygrywają z bazą assetu. Lustro `applyVisibleOverride`
- * (shelter_local_service.dart) i `userOverlayApplies` w functions/moderator_points.js:
- * poprawka moderatora albo opis użytkownika, który wchodzi razem z nazwą i typem
- * (`PointContributionService`). Opis użytkownika liczy się tylko w dokumencie
- * `source: curated`, bo tylko takie nakładki apka czyta. Opis zespołowy ze źródeł
- * (`description-pipeline`) niesie kopię z chwili zapisu, więc baza wygrywa. Opis
- * `rejected` nie jest widoczny nikomu, więc jego nazwa też nie.
- *
- * Świadome odstępstwa dla moderatora, który ocenia treść: widzi też opis `pending`
- * i `needs_review` (apka pokazuje go tylko autorowi), poprawkę moderatora w każdym
- * stanie (apka dopiero po `approved`) i dokument ze `status` innym niż `active`.
- * Bez odwzorowania: `effectiveWaterType` (apka podnosi `woda_niepotwierdzona` do
- * `woda_do_przegotowania` przy widocznym opisie) i aliasy `fromTaxonomyCode`.
- */
-export function overlayAttributesApply(
-  d: Pick<DescriptionItem, "moderatorEdited" | "createdVia" | "description" | "state" | "source">,
-): boolean {
-  return d.moderatorEdited ||
-    (d.source === "curated" && d.createdVia !== "description-pipeline" &&
-      d.description.trim() !== "" && d.state !== "rejected");
-}
-
-/**
  * Punkt tak, jak widzi go apka: baza z assetu, na niej dokument. Nazwa i typ z
  * dokumentu po poprawce moderatora albo po opisie użytkownika
  * ([overlayAttributesApply]), pozycja punktu z assetu zawsze z assetu (lustro
@@ -864,18 +842,11 @@ export async function fetchDescriptionById(pointId: string): Promise<Description
     const [filled] = await fillDescriptionAuthors([mapped]);
     return filled;
   }
-  const edited = mapped.moderatorEdited;
-  const fromDoc = overlayAttributesApply(mapped);
   const point: DescriptionItem = {
-    ...mapped,
+    ...withAssetBase(mapped, base),
     hasDoc: snap.exists(),
     inAsset: true,
-    origin: edited ? "overlay" : "asset",
-    name: fromDoc && mapped.name.trim() ? mapped.name : base.name,
-    type: fromDoc && mapped.type.trim() ? mapped.type : base.type,
-    lat: base.lat,
-    lon: base.lon,
-    base,
+    origin: mapped.moderatorEdited ? "overlay" : "asset",
   };
   if (!snap.exists()) return point;
   const [filled] = await fillDescriptionAuthors([point]);
