@@ -109,7 +109,8 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-// Baza obok tego, co widzi użytkownik. Różnica to dowód, że ktoś punkt zmienił.
+// Baza obok bieżących danych punktu (poprawka moderatora albo opis użytkownika, także
+// czekający na decyzję). Różnica to dowód, że ktoś punkt zmienił.
 function DataRows({ p }: { p: DescriptionItem }) {
   const rows: Array<[label: string, base: string, now: string]> = [
     ["Nazwa", p.base?.name ?? "", p.name],
