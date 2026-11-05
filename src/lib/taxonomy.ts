@@ -46,7 +46,10 @@ export const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
 // Etykiety do WYŚWIETLANIA — taksonomia aktualna + kody wycofane, które mogą
 // jeszcze siedzieć w starych dokumentach (alias `dom_turysty`, kategorie usunięte
 // 07/2026). Wycofanych NIE ma w [TAXONOMY_OPTIONS], więc nie da się ich wybrać.
-export const SHELTER_TYPE_LABEL: Record<string, string> = {
+// Bez prototypu: `type` z dokumentu to dowolny napis użytkownika (reguły: string ≤40), a
+// `SHELTER_TYPE_LABEL["__proto__"]` na zwykłym obiekcie zwraca Object.prototype i React
+// wywraca całą tabelę.
+export const SHELTER_TYPE_LABEL: Record<string, string> = Object.assign(Object.create(null), {
   ...Object.fromEntries(TAXONOMY_OPTIONS),
   dom_turysty: "Nocleg",
   // [2026-09-23] chatka/bacowka wycofane (rozbite na schron/nocleg/wiata/…).
@@ -61,4 +64,4 @@ export const SHELTER_TYPE_LABEL: Record<string, string> = {
   altana: "Altana (wycofane)",
   daszek: "Daszek (wycofane)",
   pasnik: "Paśnik (wycofane)",
-};
+});

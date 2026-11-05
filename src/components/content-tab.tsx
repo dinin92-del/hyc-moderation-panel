@@ -211,15 +211,21 @@ export function ContentTab() {
   ].sort((a, b) => (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity));
 
   const needle = search.trim().toLowerCase();
+  // Nazwa bieżąca i nazwa z bazy: punkt przemianowany przez użytkownika ma znajdować się
+  // także po starej nazwie, jak w wyszukiwarce punktów.
+  const pointNames = (id: string) => {
+    const p = pointById.get(id);
+    return `${p?.name ?? ""} ${p?.base?.name ?? ""}`;
+  };
   const haystack = (it: ContentItem): string => {
     switch (it.kind) {
       case "point":
       case "description":
         return `${it.p.name} ${it.p.pointId} ${it.p.authorName} ${it.p.description}`;
       case "comment":
-        return `${pointById.get(it.c.pointId)?.name ?? ""} ${it.c.pointId} ${it.c.authorName} ${it.c.text}`;
+        return `${pointNames(it.c.pointId)} ${it.c.pointId} ${it.c.authorName} ${it.c.text}`;
       case "report":
-        return `${pointById.get(it.r.pointId)?.name ?? ""} ${it.r.pointId} ${it.r.reason ?? ""}`;
+        return `${pointNames(it.r.pointId)} ${it.r.pointId} ${it.r.reason ?? ""}`;
     }
   };
   const visible = items

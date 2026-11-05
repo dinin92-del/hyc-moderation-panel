@@ -83,6 +83,8 @@ export type DescriptionItem = {
   base: PointBase | null;
   /** `moderation-panel` dla punktów wpisanych ręcznie z panelu (podpis „Zespół Hyc!"). */
   createdVia: string | null;
+  /** Pole `source` dokumentu: `curated`, `ugc`, `phone`, `described`. Nakładkę czyta apka tylko dla `curated`. */
+  source: string;
   /**
    * Autor OPISU — osobny od autora dokumentu. Opis dopisany do istniejącego
    * punktu (ścieżka update) NIE zmienia `authorUid`, więc bez tych pól panel
@@ -252,6 +254,7 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     moderatorEdited: !!d.moderatorEdit,
     base: null,
     createdVia: d.createdVia ?? null,
+    source: typeof d.source === "string" ? d.source : "",
     descriptionAuthorUid: typeof d.descriptionAuthorUid === "string" &&
       d.descriptionAuthorUid !== "" ? d.descriptionAuthorUid : null,
     descriptionAuthorCleared: authorFieldCleared(d, "descriptionAuthorUid"),
@@ -820,9 +823,33 @@ export async function fetchCommentById(pointId: string, commentId: string): Prom
 }
 
 /**
+ * Czy nazwa i typ z dokumentu wygrywają z bazą assetu. Lustro `applyVisibleOverride`
+ * (shelter_local_service.dart) i `userOverlayApplies` w functions/moderator_points.js:
+ * poprawka moderatora albo opis użytkownika, który wchodzi razem z nazwą i typem
+ * (`PointContributionService`). Opis użytkownika liczy się tylko w dokumencie
+ * `source: curated`, bo tylko takie nakładki apka czyta. Opis zespołowy ze źródeł
+ * (`description-pipeline`) niesie kopię z chwili zapisu, więc baza wygrywa. Opis
+ * `rejected` nie jest widoczny nikomu, więc jego nazwa też nie.
+ *
+ * Świadome odstępstwa dla moderatora, który ocenia treść: widzi też opis `pending`
+ * i `needs_review` (apka pokazuje go tylko autorowi), poprawkę moderatora w każdym
+ * stanie (apka dopiero po `approved`) i dokument ze `status` innym niż `active`.
+ * Bez odwzorowania: `effectiveWaterType` (apka podnosi `woda_niepotwierdzona` do
+ * `woda_do_przegotowania` przy widocznym opisie) i aliasy `fromTaxonomyCode`.
+ */
+export function overlayAttributesApply(
+  d: Pick<DescriptionItem, "moderatorEdited" | "createdVia" | "description" | "state" | "source">,
+): boolean {
+  return d.moderatorEdited ||
+    (d.source === "curated" && d.createdVia !== "description-pipeline" &&
+      d.description.trim() !== "" && d.state !== "rejected");
+}
+
+/**
  * Punkt tak, jak widzi go apka: baza z assetu, na niej dokument. Nazwa i typ z
- * dokumentu tylko po poprawce moderatora, pozycja punktu z assetu zawsze z assetu
- * (lustro `applyVisibleOverride`). Null = punktu nie ma ani w bazie, ani w Firestore.
+ * dokumentu po poprawce moderatora albo po opisie użytkownika
+ * ([overlayAttributesApply]), pozycja punktu z assetu zawsze z assetu (lustro
+ * `applyVisibleOverride`). Null = punktu nie ma ani w bazie, ani w Firestore.
  */
 export async function fetchDescriptionById(pointId: string): Promise<DescriptionItem | null> {
   const [snap, base] = await Promise.all([
@@ -838,13 +865,14 @@ export async function fetchDescriptionById(pointId: string): Promise<Description
     return filled;
   }
   const edited = mapped.moderatorEdited;
+  const fromDoc = overlayAttributesApply(mapped);
   const point: DescriptionItem = {
     ...mapped,
     hasDoc: snap.exists(),
     inAsset: true,
     origin: edited ? "overlay" : "asset",
-    name: edited && mapped.name ? mapped.name : base.name,
-    type: edited && mapped.type ? mapped.type : base.type,
+    name: fromDoc && mapped.name.trim() ? mapped.name : base.name,
+    type: fromDoc && mapped.type.trim() ? mapped.type : base.type,
     lat: base.lat,
     lon: base.lon,
     base,
