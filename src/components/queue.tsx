@@ -39,6 +39,8 @@ import {
 } from "@/lib/moderation";
 import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, fmtAge, fmtDate } from "@/lib/labels";
 import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
+import { visibleAttrs } from "@/lib/point-attrs";
+import { useAssetRows } from "@/components/use-asset-rows";
 import { mapLink } from "@/lib/coords";
 import {
   act,
@@ -143,9 +145,12 @@ function BaseDiff({ p }: { p: DescriptionItem }) {
     fetchPointBase(p.pointId).then((b) => alive && setBase(b)).catch(() => {});
     return () => { alive = false; };
   }, [p.pointId]);
+  // Wiersz bywa jeszcze surowym dokumentem (baza dochodzi po renderze), więc nazwę i typ
+  // liczymy tu tą samą regułą co lista, inaczej opis zespołowy mignąłby fałszywą różnicą.
+  const { name, type } = base ? visibleAttrs(p, base) : p;
   const rows: string[] = [];
-  if (base && p.name && p.name !== base.name) rows.push(`Nazwa w bazie: ${base.name}`);
-  if (base && p.type && p.type !== base.type) {
+  if (base && name && name !== base.name) rows.push(`Nazwa w bazie: ${base.name}`);
+  if (base && type && type !== base.type) {
     rows.push(`Kategoria w bazie: ${SHELTER_TYPE_LABEL[base.type] ?? base.type}`);
   }
   if (p.phonePending) rows.push(`Nowy telefon czeka: ${p.phonePending}`);
@@ -158,7 +163,8 @@ function BaseDiff({ p }: { p: DescriptionItem }) {
 }
 
 export function QueueDescriptions({ items, error, hideTest }: { items: DescriptionItem[]; error: string | null; hideTest: boolean }) {
-  const visible = hideTest ? items.filter((p) => !p.isTest) : items;
+  const rows = useAssetRows(items);
+  const visible = hideTest ? rows.filter((p) => !p.isTest) : rows;
   const { uids: blocked } = useBlocked();
   const { openCard, openEdit } = usePointCard();
   return (

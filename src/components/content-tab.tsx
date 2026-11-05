@@ -48,6 +48,7 @@ import {
 import { CATEGORY_LABEL, FLAG_LABEL, TARGET_LABEL, fmtDate } from "@/lib/labels";
 import { mapLink } from "@/lib/coords";
 import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
+import { useAssetRows } from "@/components/use-asset-rows";
 import { act, actDeletePoint, actDismissReports, actHide, closeTargetReports } from "@/lib/actions";
 
 // ── Wszystkie treści (scalone: nowe punkty / opisy / komentarze / zgłoszenia) ──
@@ -102,6 +103,8 @@ const FILTER_LABEL: Record<ContentFilter, string> = {
 };
 
 const PAGE_SIZE = 50;
+// Stała, żeby `useAssetRows` nie widział nowej tablicy przy każdym renderze przed załadowaniem.
+const NO_ROWS: DescriptionItem[] = [];
 
 export function ContentTab() {
   const [content, setContent] = useState<{
@@ -179,6 +182,9 @@ export function ContentTab() {
     return () => { alive = false; };
   }, [content, comments, reports]);
 
+  const newPoints = useAssetRows(content?.newPoints ?? NO_ROWS);
+  const described = useAssetRows(content?.described ?? NO_ROWS);
+
   if (!content || !comments || !reports) return <Empty text="Ładowanie…" />;
 
   // Rodzic dociągnięty wcześniej może w międzyczasie wejść do listy (np. po
@@ -186,23 +192,23 @@ export function ContentTab() {
   // przy budowie mapy, nie czyszczeniem stanu: `setState` w efekcie kaskaduje
   // render (react-hooks/set-state-in-effect), a tu wystarczy czysty filtr.
   const contentIds = new Set(
-    [...content.newPoints, ...content.described].map((p) => p.pointId),
+    [...newPoints, ...described].map((p) => p.pointId),
   );
   const pointById = new Map(
     [
       ...parents.filter((p) => !contentIds.has(p.pointId)),
-      ...content.described,
-      ...content.newPoints,
+      ...described,
+      ...newPoints,
     ].map((p) => [p.pointId, p]),
   );
 
   const items: ContentItem[] = [
-    ...content.newPoints.map((p): ContentItem => (
+    ...newPoints.map((p): ContentItem => (
       { kind: "point", key: `point/${p.pointId}`, createdAt: p.createdAt, isTest: p.isTest, p })),
     // Wiersz opisu niesie datę OPISU — i jako wyświetlaną, i jako klucz sortu
     // niżej. `p.createdAt` (data punktu) kłamał w obu rolach — patrz
     // [descriptionDate].
-    ...content.described.map((p): ContentItem => (
+    ...described.map((p): ContentItem => (
       { kind: "description", key: `desc/${p.pointId}`, createdAt: descriptionDate(p), isTest: p.isTest, p })),
     ...comments.map((c): ContentItem => (
       { kind: "comment", key: `comment/${c.pointId}/${c.commentId}`, createdAt: c.createdAt, isTest: c.isTest, c })),
@@ -221,7 +227,7 @@ export function ContentTab() {
     switch (it.kind) {
       case "point":
       case "description":
-        return `${it.p.name} ${it.p.pointId} ${it.p.authorName} ${it.p.description}`;
+        return `${it.p.name} ${it.p.base?.name ?? ""} ${it.p.pointId} ${it.p.authorName} ${it.p.description}`;
       case "comment":
         return `${pointNames(it.c.pointId)} ${it.c.pointId} ${it.c.authorName} ${it.c.text}`;
       case "report":
