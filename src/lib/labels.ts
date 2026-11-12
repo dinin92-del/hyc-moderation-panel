@@ -10,6 +10,7 @@ export const LOG_TARGET_LABEL: Record<string, string> = {
   "point-suppress": "Usunięcie punktu",
   "point-restore": "Przywrócenie punktu",
   "user-block": "Blokada konta",
+  "location-confirm-request": "Prośba o potwierdzenie lokalizacji",
 };
 
 export const FIELD_LABEL: Record<string, string> = {
@@ -33,6 +34,7 @@ export const STATE_LABEL: Record<string, string> = {
   restored: "Przywrócony",
   blocked: "Zablokowany",
   unblocked: "Odblokowany",
+  requested: "Poproszono o potwierdzenie",
 };
 
 // Kolor semantyczny stanu: zielony=ok, amber=czeka, czerwony=źle.

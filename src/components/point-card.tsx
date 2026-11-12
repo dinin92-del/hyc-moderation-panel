@@ -13,6 +13,7 @@ import {
   PublishHideButtons,
   SuppressedBadge,
   blockActions,
+  locationConfirmActions,
 } from "@/components/common";
 import { HistoryPanel } from "@/components/history-panel";
 import { PointCardContext, type PointCardApi } from "@/components/point-card-context";
@@ -305,6 +306,7 @@ function PointCard({ pointId, onClose }: { pointId: string; onClose: () => void 
                 </a>
               )}
               <KebabMenu actions={[
+                ...locationConfirmActions(point, reload),
                 ...(point.createdVia === "moderation-panel" ? [] :
                   blockActions(point.authorUid, point.authorName, blocked, reload, "Zablokuj autora punktu")),
                 ...(autor?.uid && autor.uid !== point.authorUid

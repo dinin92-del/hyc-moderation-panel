@@ -25,6 +25,7 @@ import {
   Section,
   TestBadge,
   blockActions,
+  locationConfirmActions,
   type KebabAction,
 } from "@/components/common";
 import { HistoryPanel } from "@/components/history-panel";
@@ -489,6 +490,7 @@ function ContentRow({
       kebab = [
         { label: "Karta punktu", onClick: () => openCard(p.pointId) },
         { label: "Edytuj punkt", onClick: () => openEdit(p.pointId, reload) },
+        ...locationConfirmActions(p, reload),
         ...(mapLink(p.lat, p.lon) ? [{ label: "Pokaż na mapie", href: mapLink(p.lat, p.lon)! }] : []),
         ...(isPanelPoint ? [] : blockActions(p.authorUid, p.authorName, blocked, undefined,
           opisInny ? "Zablokuj autora punktu" : undefined)),

@@ -689,6 +689,16 @@ export async function deletePoint(pointId: string, reason?: string): Promise<voi
   await fn({ pointId, reason });
 }
 
+/**
+ * Prośba do autora punktu UGC o potwierdzenie lokalizacji (mail z serwera). Adres
+ * autora zna tylko serwer. Każde niewysłanie to wyjątek z polskim komunikatem.
+ * Powód zostaje w historii moderacji, autor go nie widzi.
+ */
+export async function requestLocationConfirm(pointId: string, reason?: string): Promise<void> {
+  const fn = httpsCallable(functions, "onModeratorRequestLocationConfirm");
+  await fn({ pointId, reason });
+}
+
 /** Zdejmuje tombstone. Serwer wymaga powodu min. 25 znaków. */
 export async function restorePoint(pointId: string, powod: string): Promise<void> {
   const fn = httpsCallable(functions, "onModeratorRestorePoint");
