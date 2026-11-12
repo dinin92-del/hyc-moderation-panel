@@ -22,6 +22,7 @@ import {
   Section,
   TestBadge,
   blockActions,
+  locationConfirmActions,
   type KebabAction,
 } from "@/components/common";
 import { usePointCard } from "@/components/point-card-context";
@@ -215,6 +216,7 @@ export function QueueDescriptions({ items, error, hideTest }: { items: Descripti
                         actions={[
                           { label: "Karta punktu", onClick: () => openCard(p.pointId) },
                           { label: "Edytuj punkt", onClick: () => openEdit(p.pointId) },
+                          ...locationConfirmActions(p),
                           // Kolejka opisów moderuje OPIS, więc blokada celuje w jego
                           // autora (#615), nie w twórcę punktu. Przy nieznanej
                           // atrybucji `descriptionContributor` zwraca null / uid null

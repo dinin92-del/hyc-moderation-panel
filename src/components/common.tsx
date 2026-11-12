@@ -14,7 +14,7 @@ import {
 import { QUEUE_LIMIT, type DescriptionItem, type PointOrigin } from "@/lib/moderation";
 import { aiLabel } from "@/lib/labels";
 import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
-import { actBlock, actUnblock } from "@/lib/actions";
+import { actBlock, actRequestLocationConfirm, actUnblock } from "@/lib/actions";
 
 const ORIGIN_TONE: Record<PointOrigin, string> = {
   asset: "border-border bg-muted text-muted-foreground",
@@ -263,4 +263,18 @@ export function blockActions(
   return blocked.has(uid)
     ? [{ label: label ? label.replace("Zablokuj", "Odblokuj") : "Odblokuj autora", onClick: () => actUnblock(uid, after) }]
     : [{ label: kogo, variant: "destructive", onClick: () => actBlock(uid, name, after) }];
+}
+
+// Prośba o potwierdzenie lokalizacji do kebaba: tylko punkt dodany przez użytkownika
+// (nie z bazy, nie wpisany w panelu). Autora i jego adres zna serwer, więc panel nie
+// potrzebuje uid, a serwer sam odmówi, gdy autora nie da się ustalić.
+export function locationConfirmActions(
+  p: Pick<DescriptionItem, "pointId" | "name" | "source" | "createdVia" | "authorName">,
+  after?: () => void,
+): KebabAction[] {
+  if (p.source !== "ugc" || p.createdVia === "moderation-panel" || !p.pointId.startsWith("UGC:")) return [];
+  return [{
+    label: "Poproś o potwierdzenie (email)",
+    onClick: () => actRequestLocationConfirm(p.pointId, p.name, p.authorName, after),
+  }];
 }
