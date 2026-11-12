@@ -10,7 +10,7 @@ export const LOG_TARGET_LABEL: Record<string, string> = {
   "point-suppress": "Usunięcie punktu",
   "point-restore": "Przywrócenie punktu",
   "user-block": "Blokada konta",
-  "location-confirm-request": "Prośba o potwierdzenie lokalizacji",
+  "location-confirm-request": "Prośba o potwierdzenie punktu",
 };
 
 export const FIELD_LABEL: Record<string, string> = {
