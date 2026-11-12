@@ -95,7 +95,7 @@ export async function actDeletePoint(pointId: string, pointName: string, after?:
     () => deletePoint(pointId, ok.reason), after);
 }
 
-// Mail do autora punktu UGC z prośbą o potwierdzenie lokalizacji. Wychodzi poza system
+// Mail do autora punktu UGC z prośbą o sprawdzenie punktu. Wychodzi poza system
 // i nie da się go cofnąć, więc zawsze przez popup. Niewysłanie (brak potwierdzonego
 // adresu, okno 7 dni, punkt ukryty) serwer zgłasza wyjątkiem, więc `run` pokaże czerwony toast.
 export async function actRequestLocationConfirm(
@@ -107,15 +107,15 @@ export async function actRequestLocationConfirm(
   const punkt = pointName ? `punktu „${pointName}"` : "tego punktu";
   const autor = authorName ? ` (${authorName})` : "";
   const ok = await confirmDialog({
-    title: "Wysłać prośbę o potwierdzenie lokalizacji?",
-    body: `Autor ${punkt}${autor} dostanie maila z prośbą o potwierdzenie, że punkt stoi ` +
-      "we właściwym miejscu. Wiadomość idzie na adres z jego konta, więc jej nie cofniesz. " +
+    title: "Wysłać prośbę o potwierdzenie punktu?",
+    body: `Autor ${punkt}${autor} dostanie maila z prośbą o sprawdzenie punktu i potwierdzenie, ` +
+      "że wszystko się zgadza. Wiadomość idzie na adres z jego konta, więc jej nie cofniesz. " +
       "Kolejną prośbę o ten punkt wyślesz najwcześniej za 7 dni.",
     confirmLabel: "Wyślij mail",
     reason: { label: "Powód (opcjonalny, zostaje w historii, autor go nie zobaczy)" },
   });
   if (!ok) return;
-  await run(`locationConfirm:${pointId}`, "Mail z prośbą o potwierdzenie wysłany",
+  await run(`locationConfirm:${pointId}`, "Mail z prośbą o sprawdzenie punktu wysłany",
     () => requestLocationConfirm(pointId, ok.reason), after);
 }
 
