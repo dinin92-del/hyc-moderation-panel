@@ -25,6 +25,14 @@ import {
 import { PL_BBOX, mapLink, parseLatLon, toNumber } from "@/lib/coords";
 import { SHELTER_TYPE_LABEL, TAXONOMY_OPTIONS } from "@/lib/taxonomy";
 import { formatPhoneDisplay } from "@/lib/phone";
+import {
+  GASTRO_CHOICES,
+  GASTRO_CHOICE_LABEL,
+  choiceToGastro,
+  gastroToChoice,
+  isGastroType,
+  type GastroChoice,
+} from "@/lib/gastro";
 
 const DUPLICATE_WHY: Record<string, string> = {
   osm: "ten sam obiekt OSM",
@@ -54,6 +62,40 @@ function PhonePreview({ value }: { value: string }) {
   );
 }
 
+// Trójstanowy przełącznik gastronomii. `allowTagging=false` zostawia tylko
+// „Brak zdania": tak albo nie callable przyjmuje wyłącznie dla schroniska i noclegu,
+// a wyczyścić stary tag po zmianie kategorii wolno zawsze.
+function GastroSelect({ value, onChange, allowTagging = true }: {
+  value: GastroChoice;
+  onChange: (v: GastroChoice) => void;
+  allowTagging?: boolean;
+}) {
+  return (
+    <label className="block space-y-1 text-sm sm:max-w-xs">
+      <span className="text-muted-foreground">Gastronomia</span>
+      <Select
+        items={GASTRO_CHOICE_LABEL}
+        value={value}
+        onValueChange={(v) => onChange((v as GastroChoice | null) ?? "none")}
+      >
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {GASTRO_CHOICES.map((c) => (
+            <SelectItem key={c} value={c} disabled={!allowTagging && c !== "none"}>
+              {GASTRO_CHOICE_LABEL[c]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!allowTagging && (
+        <span className="block text-xs text-muted-foreground">
+          Tak albo nie tylko dla schroniska i noclegu. Tu tag można jedynie wyczyścić.
+        </span>
+      )}
+    </label>
+  );
+}
+
 // Formularz kuratorskiej edycji punktu. Wysyła tylko ZMIENIONE pola (callable wymaga
 // ≥1). Zmiana nazwy/opisu → serwer zapisuje approved + contentHash (bez re-moderacji).
 function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onDone: () => void; onSaved?: () => void }) {
@@ -63,8 +105,13 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
   const [lat, setLat] = useState(point.lat?.toString() ?? "");
   const [lon, setLon] = useState(point.lon?.toString() ?? "");
   const [phone, setPhone] = useState(point.phone ?? "");
+  const [gastro, setGastro] = useState<GastroChoice>(gastroToChoice(point.gastro));
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  // Kategoria z formularza, nie z punktu: przy zmianie typu serwer sprawdza nowy.
+  const gastroAllowed = isGastroType(type);
+  // Stary tag na punkcie innej kategorii zostaje widoczny, żeby dało się go zdjąć.
+  const showGastro = gastroAllowed || point.gastro !== null;
 
   async function submit() {
     const fields: PointEditFields = {};
@@ -88,13 +135,20 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
     // Pusty input = czyszczenie numeru (null w dokumencie). Format waliduje
     // callable (sanitizePhone) — panel nie duplikuje reguł.
     if (phone.trim() !== (point.phone ?? "")) fields.phone = phone.trim() || null;
+    // Tylko zmiana. `null` (brak zdania) przechodzi przy każdym typie, tak i nie
+    // tylko przy schronisku i noclegu: wybór schowany zmianą kategorii nie wychodzi.
+    const gastroValue = choiceToGastro(gastro);
+    if (gastroValue !== point.gastro && (gastroValue === null || gastroAllowed)) {
+      fields.gastro = gastroValue;
+    }
     if (Object.keys(fields).length === 0) return toast("Brak zmian do zapisania");
     setSaving(true);
     try {
       const state = await editPoint(point.pointId, fields, reason.trim());
-      // Telefon nie czeka na opis, reszta poprawek w apce wymaga zatwierdzonego stanu.
+      // Telefon i gastronomia nie czekają na opis, reszta poprawek w apce wymaga
+      // zatwierdzonego stanu.
       const waits = (state ?? point.state) !== "approved" && !!point.description &&
-        Object.keys(fields).some((k) => k !== "phone");
+        Object.keys(fields).some((k) => k !== "phone" && k !== "gastro");
       toast.success(waits
         ? "Zapisano. W aplikacji pojawi się po decyzji o opisie"
         : "Punkt zaktualizowany");
@@ -161,6 +215,9 @@ function PointEditForm({ point, onDone, onSaved }: { point: DescriptionItem; onD
         />
         <PhonePreview value={phone} />
       </label>
+      {showGastro && (
+        <GastroSelect value={gastro} onChange={setGastro} allowTagging={gastroAllowed} />
+      )}
       <label className="block space-y-1 text-sm">
         <span className="text-muted-foreground">Powód zmiany (opcjonalny, zostaje w historii)</span>
         <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
@@ -208,6 +265,7 @@ function AddPointForm() {
   const [lon, setLon] = useState("");
   const [description, setDescription] = useState("");
   const [phone, setPhone] = useState("");
+  const [gastro, setGastro] = useState<GastroChoice>("none");
   const [saving, setSaving] = useState(false);
   // Kolizje z ostatniej próby. Dodanie mimo nich wymaga świadomego kliknięcia i
   // obowiązuje tylko dla tych samych pól, inaczej obeszłoby bramkę po zmianie miejsca.
@@ -242,6 +300,9 @@ function AddPointForm() {
     const fields: PointCreateFields = { name: name.trim(), type, lat: latNum, lon: lonNum };
     if (description.trim() !== "") fields.description = description.trim();
     if (phone.trim() !== "") fields.phone = phone.trim();
+    // Brak zdania = brak pola. Wybór schowany zmianą kategorii nie wychodzi.
+    const gastroValue = choiceToGastro(gastro);
+    if (gastroValue !== null && isGastroType(type)) fields.gastro = gastroValue;
     setSaving(true);
     try {
       await createPoint(fields, force);
@@ -253,6 +314,8 @@ function AddPointForm() {
       setLon("");
       setDescription("");
       setPhone("");
+      // Gastronomia jest per punkt, jak telefon.
+      setGastro("none");
       setDupCheck(null);
     } catch (e) {
       const hits = duplicatesOf(e);
@@ -353,6 +416,8 @@ function AddPointForm() {
             />
             <PhonePreview value={phone} />
           </label>
+
+          {isGastroType(type) && <GastroSelect value={gastro} onChange={setGastro} />}
 
           {duplicates && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">

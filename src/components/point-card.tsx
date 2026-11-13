@@ -45,6 +45,7 @@ import {
   type ReportItem,
 } from "@/lib/moderation";
 import { SHELTER_TYPE_LABEL } from "@/lib/taxonomy";
+import { gastroWord, isGastroType } from "@/lib/gastro";
 
 const CARD_PARAM = "punkt";
 
@@ -123,6 +124,18 @@ function DataRows({ p }: { p: DescriptionItem }) {
     ["Telefon", "", p.phone ?? "—"],
     ["Pozycja", "", p.lat !== null ? `${p.lat}, ${p.lon}` : "—"],
   ];
+  // Tylko dokument: flagi `ga` z bazy panel nie widzi, więc brak klucza to brak
+  // zdania, a nie „bez gastronomii". Wiersz zostaje też przy starym tagu na
+  // punkcie innej kategorii, żeby było widać, co zdjąć.
+  if (isGastroType(p.type) || p.gastro !== null || p.gastroPending !== null) {
+    rows.push([
+      "Gastronomia",
+      "",
+      p.gastro === null
+        ? "brak zdania (decyduje baza)"
+        : `${gastroWord(p.gastro)}${p.gastroSource ? ` (źródło: ${p.gastroSource})` : ""}`,
+    ]);
+  }
   return (
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-sm">
       {rows.map(([label, base, now]) => (
@@ -343,6 +356,11 @@ function PointCard({ pointId, onClose }: { pointId: string; onClose: () => void 
               {point.phonePending && (
                 <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
                   Telefon od użytkownika czeka na decyzję: {point.phonePending}
+                </p>
+              )}
+              {point.gastroPending !== null && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  Gastronomia od użytkownika czeka na decyzję: {gastroWord(point.gastroPending)}
                 </p>
               )}
             </Block>
