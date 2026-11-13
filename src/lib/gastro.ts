@@ -7,7 +7,7 @@
 // ⛔ MIRROR of `GASTRO_TYPES` in functions/gastro_z_opisu.js (app repo). The callable
 // rejects a boolean `gastro` for any other type, so a drift here shows up as an
 // error toast, not as a silent wrong write.
-export const GASTRO_TYPES: ReadonlySet<string> = new Set(["schronisko", "nocleg"]);
+export const GASTRO_TYPES: ReadonlySet<string> = new Set(["schronisko", "nocleg", "baza_namiotowa"]);
 
 /** Three states of the switch. `none` sends `null` (clears `gastro` and `gastroSource`). */
 export type GastroChoice = "none" | "tak" | "nie";
