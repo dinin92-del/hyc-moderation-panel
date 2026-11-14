@@ -72,6 +72,15 @@ export type DescriptionItem = {
   phone: string | null;
   /** Numer od użytkownika czekający na werdykt, publiczny dopiero po nim. */
   phonePending: string | null;
+  /**
+   * Tag gastronomii z dokumentu. `null` = brak klucza, czyli brak zdania: decyduje
+   * flaga `ga` w bazie, której panel nie widzi. Patrz `@/lib/gastro`.
+   */
+  gastro: boolean | null;
+  /** Skąd tag: `formularz`, `opis`, `research`, `moderator`. */
+  gastroSource: string | null;
+  /** Zaznaczenie od użytkownika czekające na decyzję o opisie. */
+  gastroPending: boolean | null;
   /** Dokument `points/{id}` istnieje. Punkt z assetu zwykle go nie ma. */
   hasDoc: boolean;
   /** Punkt jest w assecie, więc pozycji nie zmienia się z panelu. */
@@ -249,6 +258,9 @@ function mapDescription(d: DocumentData, id: string): DescriptionItem {
     type: d.type ?? "",
     phone: typeof d.phone === "string" && d.phone.trim() !== "" ? d.phone : null,
     phonePending: typeof d.phonePending === "string" && d.phonePending !== "" ? d.phonePending : null,
+    gastro: typeof d.gastro === "boolean" ? d.gastro : null,
+    gastroSource: typeof d.gastroSource === "string" && d.gastroSource !== "" ? d.gastroSource : null,
+    gastroPending: typeof d.gastroPending === "boolean" ? d.gastroPending : null,
     hasDoc: true,
     inAsset: false,
     origin: d.source === "ugc" ? "ugc" : "overlay",
@@ -628,6 +640,12 @@ export type PointEditFields = Partial<{
   lon: number;
   /** Numer kontaktowy; `null` czyści pole w dokumencie. */
   phone: string | null;
+  /**
+   * Tag gastronomii: `true`/`false` to decyzja moderatora (serwer stempluje
+   * `gastroSource: "moderator"` i kasuje `gastroPending`), `null` czyści tag.
+   * Boolean tylko dla typów z `GASTRO_TYPES`, inaczej callable rzuca.
+   */
+  gastro: boolean | null;
 }>;
 
 /** Zapisuje zmienione pola punktu (tylko podane wchodzą do update). */
@@ -654,6 +672,11 @@ export type PointCreateFields = {
   description?: string;
   /** Numer kontaktowy punktu (opcjonalny; walidacja po stronie callable). */
   phone?: string;
+  /**
+   * Tag gastronomii, tylko gdy moderator wybrał tak albo nie. Brak pola = brak
+   * zdania. Domyślne `false` blokowałoby research i automat z opisu.
+   */
+  gastro?: boolean;
 };
 
 /** Kolizja z istniejącym punktem, którą zgłasza serwer przy dodawaniu. */
