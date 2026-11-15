@@ -7,6 +7,7 @@ import { BlockedProvider } from "@/components/blocked-context";
 import { BlockedTab } from "@/components/blocked-tab";
 import { ConfirmHost } from "@/components/confirm-host";
 import { ContentTab } from "@/components/content-tab";
+import { EditsTab } from "@/components/edits-tab";
 import { EnvSwitch, EnvBanner } from "@/components/env-switch";
 import { PointCardProvider } from "@/components/point-card";
 import { AddPointDialog } from "@/components/point-forms";
@@ -22,6 +23,11 @@ import {
   type DescriptionItem,
   type ReportItem,
 } from "@/lib/moderation";
+import { ACTIVE_ENV } from "@/lib/firebase";
+import { watchPointEditsQueue, type PointEditItem } from "@/lib/point-edits";
+
+// Edits exist only on DEV until the community branch ships; PROD rules would refuse the read.
+const EDITS_ON = ACTIVE_ENV === "dev";
 
 export default function Home() {
   // Provider WEWNĄTRZ AuthGate — subskrypcja blokad startuje dopiero po
@@ -48,6 +54,8 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
   const [descsErr, setDescsErr] = useState<string | null>(null);
   const [reportsErr, setReportsErr] = useState<string | null>(null);
   const [hideTest, setHideTest] = useState(false);
+  const [edits, setEdits] = useState<PointEditItem[]>([]);
+  const [editsErr, setEditsErr] = useState<string | null>(null);
 
   useEffect(() => {
     const u1 = watchCommentsQueue(
@@ -62,7 +70,11 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
       (items) => { setReportsErr(null); setReports(items); },
       () => setReportsErr("Błąd kolejki zgłoszeń."),
     );
-    return () => { u1(); u2(); u3(); };
+    const u4 = EDITS_ON ? watchPointEditsQueue(
+      (items) => { setEditsErr(null); setEdits(items); },
+      () => setEditsErr("Błąd kolejki zmian. Indeks Firestore może być jeszcze w budowie, odśwież za chwilę."),
+    ) : () => {};
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const queueTotal = comments.length + descs.length + reports.length;
@@ -98,6 +110,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <TabsList>
               <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
+              {EDITS_ON && <TabsTrigger value="edits">Edycje ({edits.length})</TabsTrigger>}
               <TabsTrigger value="points">Punkty</TabsTrigger>
               <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
               <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
@@ -125,6 +138,10 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
             <QueueComments items={comments} error={commentsErr} hideTest={hideTest} />
             <QueueDescriptions items={descs} error={descsErr} hideTest={hideTest} />
             <QueueReports items={reports} error={reportsErr} hideTest={hideTest} />
+          </TabsContent>
+
+          <TabsContent value="edits" className="pt-4">
+            <EditsTab items={edits} error={editsErr} />
           </TabsContent>
 
           <TabsContent value="points" className="pt-4">
