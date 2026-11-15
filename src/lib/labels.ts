@@ -11,6 +11,7 @@ export const LOG_TARGET_LABEL: Record<string, string> = {
   "point-restore": "Przywrócenie punktu",
   "user-block": "Blokada konta",
   "location-confirm-request": "Prośba o potwierdzenie punktu",
+  "community-edit": "Zmiany od użytkownika",
 };
 
 export const FIELD_LABEL: Record<string, string> = {
