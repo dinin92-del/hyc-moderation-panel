@@ -74,8 +74,19 @@ export function watchPointEditsQueue(cb: (items: PointEditItem[]) => void, onErr
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => mapEdit(d.data(), d.id))), onErr);
 }
 
-/** Zatwierdzenie wprowadza zmiany i zdejmuje zdjęcia; odrzucenie wymaga powodu. */
-export async function decidePointEdit(editId: string, approve: boolean, reason?: string): Promise<void> {
+/**
+ * Zatwierdzenie wprowadza zmiany i zdejmuje zdjęcia; odrzucenie wymaga powodu.
+ * `expectedAt` to `at` propozycji TAK, JAK widział je ten panel (user 1117
+ * ultrareview #1): backend porównuje je z aktualnym `at` w bazie i odrzuca
+ * decyzję, jeśli ktoś zresubmitował propozycję w międzyczasie — inaczej
+ * moderator zatwierdzałby treść, której nigdy nie widział.
+ */
+export async function decidePointEdit(
+  editId: string,
+  approve: boolean,
+  expectedAt: number | null,
+  reason?: string,
+): Promise<void> {
   const fn = httpsCallable(functions, "onModeratorPointEditDecision");
-  await fn({ editId, approve, reason: reason ?? "" });
+  await fn({ editId, approve, expectedAt, reason: reason ?? "" });
 }
