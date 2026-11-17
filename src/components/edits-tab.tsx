@@ -104,7 +104,7 @@ async function decide(e: PointEditItem, approve: boolean) {
   if (inFlight.has(key)) return;
   inFlight.add(key);
   try {
-    await decidePointEdit(e.id, approve, ok.reason);
+    await decidePointEdit(e.id, approve, e.at, ok.reason);
     toast.success(approve ? "Zmiany zatwierdzone" : "Zmiany odrzucone");
   } catch (err) {
     toast.error("Nie udało się: " + (err instanceof Error ? err.message : "błąd"));
