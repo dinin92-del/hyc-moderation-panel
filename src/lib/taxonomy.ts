@@ -40,6 +40,10 @@ export const TAXONOMY_OPTIONS: Array<[code: string, label: string]> = [
   ["woda_pitna", "Woda pitna"],
   ["woda_do_przegotowania", "Woda do przegotowania"],
   ["woda_niepotwierdzona", "Woda niepotwierdzona"],
+  // [2026-11-17] Toalety: parytet z ShelterType.toaleta w apce (lib/core/models/shelter.dart,
+  // etykieta „Toaleta", zrzut scripts/taksonomia_etykiety.json). Wybieralny dopiero po
+  // wdrożeniu Functions z tym kodem w TAXONOMY_CODES (inaczej backend odrzuci zapis).
+  ["toaleta", "Toaleta"],
   ["nieznane", "Typ nieznany"],
 ];
 
