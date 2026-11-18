@@ -109,6 +109,7 @@ const AI_LABEL_EXTRA: Record<string, string> = {
   link_reklama: "Link lub reklama",
   gibberish: "Bełkot",
   jakosc: "Niska jakość",
+  bez_opisu: "Bez opisu",
 };
 export function aiLabel(l: string): string {
   return AI_LABEL_EXTRA[l] ?? CATEGORY_LABEL[l] ?? FLAG_LABEL[l] ?? l;
