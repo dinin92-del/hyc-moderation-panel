@@ -10,7 +10,8 @@ export type EditFields = Partial<{
   name: string;
   type: string;
   phone: string | null;
-  description: string;
+  // null = remove the description (stage 2 of the optional description, 1118).
+  description: string | null;
   lat: number;
   lon: number;
 }>;
