@@ -23,11 +23,7 @@ import {
   type DescriptionItem,
   type ReportItem,
 } from "@/lib/moderation";
-import { ACTIVE_ENV } from "@/lib/firebase";
 import { watchPointEditsQueue, type PointEditItem } from "@/lib/point-edits";
-
-// Edits exist only on DEV until the community branch ships; PROD rules would refuse the read.
-const EDITS_ON = ACTIVE_ENV === "dev";
 
 export default function Home() {
   // Provider WEWNĄTRZ AuthGate — subskrypcja blokad startuje dopiero po
@@ -70,10 +66,10 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
       (items) => { setReportsErr(null); setReports(items); },
       () => setReportsErr("Błąd kolejki zgłoszeń."),
     );
-    const u4 = EDITS_ON ? watchPointEditsQueue(
+    const u4 = watchPointEditsQueue(
       (items) => { setEditsErr(null); setEdits(items); },
       () => setEditsErr("Błąd kolejki zmian. Indeks Firestore może być jeszcze w budowie, odśwież za chwilę."),
-    ) : () => {};
+    );
     return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
@@ -110,7 +106,7 @@ function Panel({ email, signOut }: { email: string; signOut: () => void }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <TabsList>
               <TabsTrigger value="queue">Kolejka ({queueTotal})</TabsTrigger>
-              {EDITS_ON && <TabsTrigger value="edits">Edycje ({edits.length})</TabsTrigger>}
+              <TabsTrigger value="edits">Edycje ({edits.length})</TabsTrigger>
               <TabsTrigger value="points">Punkty</TabsTrigger>
               <TabsTrigger value="content">Wszystkie treści</TabsTrigger>
               <TabsTrigger value="blocked">Zablokowani</TabsTrigger>
