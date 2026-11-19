@@ -46,7 +46,7 @@ function diffRows(e: PointEditItem): DiffRow[] {
     rows.push({ label: "Położenie", before: coords(e.base.lat, e.base.lon), after: coords(p.lat, p.lon) });
   }
   if (p.description !== undefined) {
-    rows.push({ label: "Opis", before: e.base.description || "—", after: p.description });
+    rows.push({ label: "Opis", before: e.base.description || "—", after: p.description ?? "usunięty" });
   }
   return rows;
 }
