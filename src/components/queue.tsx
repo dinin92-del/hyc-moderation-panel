@@ -196,6 +196,10 @@ export function QueueDescriptions({ items, error, hideTest }: { items: Descripti
                       {p.isTest && <TestBadge />}
                     </div>
                     <LabelChips labels={p.labels} />
+                    {/* Nowy punkt bez opisu: kategoria to jedyna treść obok nazwy i zdjęć. */}
+                    {p.origin === "ugc" && p.type && (
+                      <div className="mt-1 text-xs text-muted-foreground">{SHELTER_TYPE_LABEL[p.type] ?? p.type}</div>
+                    )}
                     {autor && <div className="mt-1 text-xs text-muted-foreground">{autor.name}</div>}
                   </TableCell>
                   <TableCell className="align-top text-sm">
