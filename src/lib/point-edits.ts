@@ -14,6 +14,8 @@ export type EditFields = Partial<{
   description: string | null;
   lat: number;
   lon: number;
+  // Gastronomy tag the author changed (true or false), see `@/lib/gastro`.
+  gastro: boolean;
 }>;
 
 export type EditBase = {
@@ -23,6 +25,8 @@ export type EditBase = {
   lon: number | null;
   phone: string | null;
   description: string | null;
+  // The document's own tag, null = no opinion (the asset decides).
+  gastro: boolean | null;
 };
 
 export type PointEditItem = {
@@ -55,6 +59,7 @@ function mapEdit(d: Record<string, unknown>, id: string): PointEditItem {
       lon: base.lon ?? null,
       phone: base.phone ?? null,
       description: base.description ?? null,
+      gastro: typeof base.gastro === "boolean" ? base.gastro : null,
     },
     proposed: (d.proposed ?? {}) as EditFields,
     removePhotoIds: Array.isArray(d.removePhotoIds)

@@ -18,6 +18,7 @@ import { usePointCard } from "@/components/point-card-context";
 import { inFlight } from "@/lib/actions";
 import { confirmDialog } from "@/lib/confirm";
 import { mapLink } from "@/lib/coords";
+import { GASTRO_CHOICE_LABEL, gastroWord } from "@/lib/gastro";
 import { fmtDate } from "@/lib/labels";
 import { fetchPhotosForPoint, type PhotoItem } from "@/lib/moderation";
 import { formatPhoneDisplay } from "@/lib/phone";
@@ -42,6 +43,9 @@ function diffRows(e: PointEditItem): DiffRow[] {
   if (p.name !== undefined) rows.push({ label: "Nazwa", before: e.base.name || "—", after: p.name });
   if (p.type !== undefined) rows.push({ label: "Kategoria", before: typeLabel(e.base.type), after: typeLabel(p.type) });
   if (p.phone !== undefined) rows.push({ label: "Telefon", before: phoneLabel(e.base.phone), after: phoneLabel(p.phone) });
+  if (p.gastro !== undefined) {
+    rows.push({ label: "Gastronomia", before: e.base.gastro == null ? GASTRO_CHOICE_LABEL.none : gastroWord(e.base.gastro), after: gastroWord(p.gastro) });
+  }
   if (p.lat !== undefined) {
     rows.push({ label: "Położenie", before: coords(e.base.lat, e.base.lon), after: coords(p.lat, p.lon) });
   }
